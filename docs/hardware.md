@@ -27,3 +27,12 @@ Measured with `env:probe` (`src/probe/main.cpp`, driven by `tools/probe.py`).
 - ST7123 panel: M5GFX detects it on its own; touch polling goes through M5GFX's Touch_ST7123.
 - Wi-Fi credentials come from `include/secrets.h` (gitignored, copied from Tabulous5). This unit
   had no NVS network saved.
+
+## Phase 1 measurements (2026-09-30)
+- Boot to joined Wi-Fi: ~4 s. mDNS name `flapboard.local`.
+- 50 sequential uploads (300 KB-2 MB, 59 MB total), each downloaded back and compared: **50/50**,
+  0 watchdog restarts, 0 lost router pings. A 400 KB upload takes ~0.6-0.8 s (~500 KB/s).
+- After the run: internal free 151 KB, largest DMA block 55 KB (was 82 KB at boot). Watch this as
+  features are added.
+- macOS waited 5 s on every `.local` lookup for an IPv6 (AAAA) answer. `WiFi.enableIPv6(true)`
+  after `WiFi.mode()` gives a link-local address that mDNS advertises; lookups now take ~10 ms.

@@ -344,6 +344,62 @@ publish-on-change plus a 30 s heartbeat.
 The broker password is never sent back to the web page. A blank field keeps
 the stored one.
 
+## 11a. Presence and the train car's lights (added 2026-09-30)
+
+The sign goes in a real lit train car. The display and the car's lights turn
+on and off together.
+
+**One power decision, two outputs.** A single resolver decides "should the
+car be lit?". The display backlight and a **relay output** both follow it,
+so they can never disagree. Priority, first match wins:
+
+1. **HA / MQTT OFF latch**: off, and it survives a reboot (as on the Pi).
+2. **Sleep schedule**: off during scheduled off-hours.
+3. **Motion** (if enabled): on when motion is seen; off after N minutes with
+   none (N is a setting, default 10).
+4. Otherwise on.
+
+MQTT ON releases the latch, as on the Pi; it does not force the display on
+against the schedule. There is also a setting for the relay to follow the
+display (default) or be driven on its own, in case the lights ever need to be
+separate. If they do, it becomes its own HA switch.
+
+**Relay output.**
+- The GPIO number is a setting (with a list of the Tab5 pins that are really
+  free, checked against the board definition and the keyboard/Grove use).
+  Active-high or active-low is also a setting.
+- The pin is driven OFF from the first line of `setup()`, so a reboot never
+  flashes the lights.
+- Wiring: a 3.3 V GPIO must drive an **opto-isolated relay module** (or the M5
+  Relay unit), never a bare coil. If the car's lights are mains-powered, the
+  relay module must be rated for it and properly enclosed. We'll confirm that
+  when you pick the hardware.
+- Web: a "Lights" test button and the current state with its reason, for
+  example "off: no motion for 10 min".
+
+**Camera motion sensor** (the Tab5's front 2 MP MIPI camera):
+- Capture at the lowest mode the sensor offers, then reduce each frame (ISP
+  or PPA) to about 80×45 luma and compare it with a slowly updating
+  background. "Motion" means more than X % of cells changed by more than Y.
+  Sensitivity and minimum area are settings. It runs at about 5 fps in its
+  own low-priority task.
+- **Its own light:** the camera faces the same way as the screen, so the
+  display or car lights switching on changes the whole scene. Detection pauses
+  for a few seconds after any power change and the background is re-learned;
+  a whole-frame brightness change is treated as lighting, not motion.
+- **Dark car:** there is no IR. In a fully dark car the camera sees nothing.
+  Ambient light (or leaving the lights on while people are present) is
+  needed. We'll test real light levels on the car.
+- **Privacy:** frames are never stored, sent or shown. The one exception is an
+  on-demand low-resolution "motion view" on the web page, for aiming and
+  tuning, which is off unless opened.
+- HA gets a `binary_sensor` "Motion", plus the relay/lights state.
+
+**Phase:** a camera spike (does `esp_video` start the Tab5's sensor from
+Arduino; frame rate, CPU and RAM cost with Wi-Fi up) runs right after
+Phase 1, because internal RAM is tight. The full feature lands with MQTT
+(Phase 7). The relay goes in with the power resolver in Phase 6.
+
 ## 12. Touch and the info sheet
 
 - **Decided: a long press (about 1 s) anywhere** opens the info sheet, so a passing
@@ -386,7 +442,8 @@ the stored one.
 | 4 | Layout config, fonts, side images, live preview | Preview matches the device screenshot for several layouts |
 | 5 | Message library, templates, clock, TZ, weather | Clock flips only changed digits; weather fills in; TLS RAM checked |
 | 6 | Scheduler + sleep + playlists (ported tests) | Native tests pass; schedule changes mode sign↔photo on the device |
-| 7 | MQTT/HA | Entities show in HA; latch behaviour matches the Pi |
+| 6b | Camera spike (after Phase 1): sensor up from Arduino, fps/RAM cost | Frames arrive with Wi-Fi up; internal RAM budget still OK |
+| 7 | MQTT/HA, relay output, camera motion | Entities show in HA; latch matches the Pi; relay follows display; motion wakes and times out |
 | 8 | Info sheet + touch | Long press shows IP; tap wakes; mode buttons work |
 | 9 | Photo mode + file manager + transitions | Pi-equivalent features; browser resize path; 12 MP phone JPEG copied straight to the card still shows |
 | 10 | OTA, backup/restore, README, web installer (as for T48) | Release build flashed through the web installer |

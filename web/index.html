@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlapBoard</title><link rel="stylesheet" href="/style.css"></head><body>
+<header><div class="in"><b id="name">FlapBoard</b>
+<nav><a href="/" class="on">Status</a><a href="/library">Files</a></nav></div></header>
+<main>
+<div id="note"></div>
+<section class="card"><h2>Status</h2><dl id="st"><dt>Loading</dt><dd>...</dd></dl></section>
+<section class="card"><h2>This sign</h2>
+<label for="dn">Name (also its network name: <span id="host" class="dim"></span>)</label>
+<input id="dn" maxlength="40" autocomplete="off">
+<div class="row"><button id="save">Save</button></div></section>
+<section class="card"><h2>Wi-Fi chip</h2><dl id="c6"></dl>
+<div class="row"><button id="c6up" class="sec" disabled>Update Wi-Fi chip firmware</button></div></section>
+<section class="card"><h2>System</h2>
+<div class="row"><button id="reboot" class="danger">Restart</button></div></section>
+<section class="card"><h2>Recent activity</h2><pre class="log" id="log"></pre></section>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
+function size(n){const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]}
+function up(s){const h=Math.floor(s/3600),m=Math.floor(s/60)%60;return (h?h+' h ':'')+m+' min'}
+let edited=false;$('#dn').oninput=()=>edited=true;
+async function refresh(){
+  try{
+    const s=await (await fetch('/api/status')).json();
+    $('#name').textContent=s.device_name;document.title=s.device_name;
+    if(!edited)$('#dn').value=s.device_name;$('#host').textContent=s.hostname;
+    const w=s.wifi;
+    const wifi=w.state==='connected'?'<span class="good">connected</span> to '+esc(w.ssid)+' ('+w.rssi+' dBm)':'<span class="warn">'+esc(w.state)+'</span> '+esc(w.ssid);
+    const rows=[['Wi-Fi',wifi],['Address',w.ip?esc(w.ip)+' &middot; '+esc(s.hostname):'-'],
+      ['SD card',s.sd.mounted?size(s.sd.free_bytes)+' free of '+size(s.sd.total_bytes)+' ('+esc(s.sd.bus)+')':'<span class="bad">no card</span>'],
+      ['Clock (RTC)',esc(s.rtc)],['Battery',s.battery.mv+' mV, '+s.battery.percent+'%'+(s.battery.ma>50?' (charging)':'')],
+      ['Memory','internal '+size(s.memory.internal_free)+', largest DMA '+size(s.memory.dma_largest)+', PSRAM '+size(s.memory.psram_free)],
+      ['Link watchdog',w.pings_ok+' pings ok, '+w.pings_lost+' lost, '+w.watchdog_restarts+' restarts'],
+      ['Up',up(s.uptime_s)],['Firmware',esc(s.version)]];
+    $('#st').innerHTML=rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('');
+    const c=s.wifi_chip;
+    $('#c6').innerHTML='<dt>Firmware</dt><dd>'+esc(c.firmware)+'</dd><dt>This build expects</dt><dd>'+esc(c.expected)+'</dd><dt>State</dt><dd>'+(c.update_available?'<span class="warn">update available</span>':'<span class="good">matches</span>')+'</dd>';
+    $('#c6up').disabled=!c.update_available;
+    const l=await (await fetch('/api/log')).json();
+    $('#log').textContent=l.slice().reverse().join('\n');
+  }catch(e){}
+}
+$('#save').onclick=async()=>{
+  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_name:$('#dn').value.trim()})});
+  const d=await r.json();edited=false;
+  if(r.ok)note('ok','Saved. The new network name takes effect after a restart.');else note('err',d.error||'Could not save');refresh();
+};
+$('#c6up').onclick=async()=>{if(!confirm('Download and flash the matching Wi-Fi chip firmware? The sign restarts when it is done (a minute or two).'))return;
+  const r=await fetch('/api/c6update',{method:'POST'});const d=await r.json();note(r.ok?'ok':'err',r.ok?'Updating the Wi-Fi chip... this page will come back after the restart.':d.error)};
+$('#reboot').onclick=async()=>{if(!confirm('Restart the sign?'))return;await fetch('/api/reboot',{method:'POST'});note('ok','Restarting...')};
+refresh();setInterval(refresh,5000);
+</script></body></html>

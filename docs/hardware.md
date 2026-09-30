@@ -36,3 +36,18 @@ Measured with `env:probe` (`src/probe/main.cpp`, driven by `tools/probe.py`).
   features are added.
 - macOS waited 5 s on every `.local` lookup for an IPv6 (AAAA) answer. `WiFi.enableIPv6(true)`
   after `WiFi.mode()` gives a link-local address that mDNS advertises; lookups now take ~10 ms.
+
+## Camera spike (2026-09-30, `env:camspike`)
+- Sensor: SC202CS driver (SmartSens' name for the "SC2356"), MIPI-CSI, own clock (no XCLK), enabled by
+  PI4IOE5V6408 @0x43 pin 6, which M5GFX already sets high at boot.
+- SCCB shares M5Unified's internal I2C **port 1** (G31/G32): `i2c_master_get_bus_handle(M5.In_I2C.getPort())`
+  passed to `esp_video_init` with `init_sccb = false`. The two sides are not serialized against each
+  other (per M5GFX's own comment); 95 s of streaming with `M5.update()` polling touch showed no errors.
+  The full feature must keep all other I2C users on the main loop and watch for this.
+- `esp_video_init` 40 ms. Formats offered on /dev/video0: RAW8 BGGR, RGB565, RGB888, YUV420, UYVY. Only
+  1280x720 (the prebuilt's default sensor mode). Streams YUV420 at a steady **30.0 fps** with the ISP's
+  auto exposure (mean luma ~115-120 indoors).
+- Cost: ~12 KB internal RAM, DMA largest block 102 KB -> 94 KB; PSRAM 2.7 MB for two frame buffers.
+  Reducing a frame to an 80x45 luma grid (every 4th pixel/row): **3.6 ms**.
+- Idle scene: motion score 0% at a threshold of 12 levels (no false triggers from sensor noise).
+  Detection itself not yet exercised (nobody moved in front of it).

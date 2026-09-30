@@ -1,0 +1,257 @@
+<title>FlapBoard Clack Audition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a station board up top (the thing being heard), controls in a two-column
+   bench under it that stacks on phones. */
+:root{
+  --bg:#eef0ee; --panel:#fbfcfb; --ink:#1b211e; --dim:#5e6862; --line:#cfd6d1;
+  --board:#15181a; --flap:#23282b; --flapHi:#2d3337; --glyph:#f1efe6; --accent:#c7801a; --good:#2f7d4f;
+  --display:"Barlow Condensed","Arial Narrow",sans-serif; --body:"IBM Plex Sans",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111413; --panel:#191d1b; --ink:#e6ebe7; --dim:#96a19a; --line:#2c332f;
+  --board:#0a0c0d; --flap:#1d2124; --flapHi:#262b2f; --glyph:#f3f0e4; --accent:#e39a33; --good:#5cc187; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111413; --panel:#191d1b; --ink:#e6ebe7; --dim:#96a19a; --line:#2c332f;
+  --board:#0a0c0d; --flap:#1d2124; --flapHi:#262b2f; --glyph:#f3f0e4; --accent:#e39a33; --good:#5cc187; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--body);margin:0;padding-inline:16px;padding-block:20px 48px}
+.wrap{max-width:1040px;margin:0 auto;display:grid;gap:18px}
+h1{font:700 clamp(28px,4.4vw,44px)/1 var(--display);letter-spacing:.04em;text-transform:uppercase;margin:0;text-wrap:balance}
+.lede{color:var(--dim);max-width:66ch;margin:6px 0 0}
+.boardbox{background:var(--board);border-radius:10px;padding:clamp(8px,1.6vw,16px);overflow-x:auto}
+.board{display:grid;grid-template-columns:repeat(22,minmax(0,1fr));gap:3px;min-width:560px}
+.cell{position:relative;aspect-ratio:3/4;background:linear-gradient(var(--flapHi) 0 50%,var(--flap) 50% 100%);border-radius:3px;
+  display:flex;align-items:center;justify-content:center;font:700 clamp(13px,2.2vw,26px)/1 var(--display);color:var(--glyph)}
+.cell::after{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--board);opacity:.9}
+.cell.tile-R{background:#c8312b}.cell.tile-O{background:#e07b22}.cell.tile-Y{background:#e8c22a}.cell.tile-G{background:#2f8f4e}
+.cell.tile-B{background:#2d5fb3}.cell.tile-V{background:#7a4bb0}.cell.tile-W{background:#ecebe4}.cell.tile-K{background:#0d0f10}
+.bench{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:18px}
+@media (max-width:760px){.bench{grid-template-columns:minmax(0,1fr)}}
+section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}
+h2{font:700 15px/1.2 var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:0 0 12px}
+.styles{display:grid;gap:10px}
+.style{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+.style[aria-checked="true"]{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.style b{font:600 15px/1.2 var(--body)}.style small{grid-column:1/-1;color:var(--dim)}
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.chip{font:500 12px/1 var(--mono);padding:6px 7px;border-radius:5px;border:1px solid var(--line);background:none;color:var(--ink);cursor:pointer}
+.stars{display:flex;gap:2px}.stars button{background:none;border:none;font-size:18px;line-height:1;color:var(--line);cursor:pointer;padding:0 1px}
+.stars button.on{color:var(--accent)}
+.ctl{display:grid;gap:4px;margin-bottom:12px}
+.ctl label{display:flex;justify-content:space-between;font-size:13px;color:var(--dim)}
+.ctl output{font:500 13px var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+input[type=range]{width:100%;accent-color:var(--accent)}
+select{font:inherit;padding:6px 8px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.btn{font:600 14px var(--body);padding:10px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#1b140a;cursor:pointer}
+.btn.sec{background:none;color:var(--ink);border-color:var(--line)}
+.btn:focus-visible,.chip:focus-visible,.style:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.check{display:flex;gap:8px;align-items:center;font-size:14px;margin:6px 0}
+.stat{font:400 13px var(--mono);color:var(--dim);font-variant-numeric:tabular-nums;min-height:1.5em}
+textarea{width:100%;min-height:74px;font:13px var(--mono);border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);padding:8px}
+.fine{font-size:13px;color:var(--dim)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>FlapBoard clack audition</h1>
+    <p class="lede">Pick a sound style, then change the board to hear it the way the sign will sound: every flap turns at the same speed, so cells stop one by one as they reach their letter. Rate the styles and paste your notes back to Claude.</p>
+  </header>
+
+  <div class="boardbox"><div class="board" id="board" aria-label="Simulated 22 by 6 split-flap board"></div></div>
+
+  <div class="bench">
+    <section>
+      <h2>Sound styles</h2>
+      <div class="styles" id="styles" role="radiogroup" aria-label="Sound style"></div>
+      <p class="fine" style="margin:12px 0 0">All four are synthesised, so the project owns them outright. Real recordings go here too once you approve downloading them.</p>
+    </section>
+
+    <section>
+      <h2>Play</h2>
+      <div class="row" style="margin-bottom:14px">
+        <button class="btn" id="change">Change the board</button>
+        <button class="btn sec" id="spin">One cell, A to Z</button>
+        <button class="btn sec" id="full">Full spin</button>
+      </div>
+      <div class="stat" id="stat">Tap a button to start the sound.</div>
+      <div class="ctl"><label for="flip">Time per flap <output id="flipOut"></output></label><input type="range" id="flip" min="30" max="160" step="5" value="70"></div>
+      <div class="ctl"><label for="vary">Speed difference between modules <output id="varyOut"></output></label><input type="range" id="vary" min="0" max="10" step="0.5" value="3"></div>
+      <div class="ctl"><label for="vol">Volume <output id="volOut"></output></label><input type="range" id="vol" min="0" max="100" step="1" value="70"></div>
+      <div class="ctl"><label for="start">How the cells start</label>
+        <select id="start"><option value="together">All at once</option><option value="random" selected>Small random delay</option><option value="wave">Left-to-right wave</option></select></div>
+      <label class="check"><input type="checkbox" id="pan" checked> Spread across stereo by column</label>
+      <label class="check"><input type="checkbox" id="cap"> Limit to 24 voices, like the Tab5 mixer</label>
+      <h2 style="margin-top:16px">Your notes</h2>
+      <textarea id="notes" readonly aria-label="Your ratings, ready to copy"></textarea>
+      <div class="row" style="margin-top:8px"><button class="btn sec" id="copy">Copy notes</button><span class="fine" id="copied"></span></div>
+    </section>
+  </div>
+</div>
+
+<script>
+const SOUNDS = __SOUNDS__;
+const STYLE_INFO = {
+  solari:{name:"Station board", desc:"Plastic flaps, crisp tock with a small bounce. Airport and train-station boards."},
+  vesta:{name:"Home board", desc:"Softer and more muffled, short. Closer to a modern Vestaboard."},
+  metal:{name:"Aluminium flaps", desc:"Bright and ringy, like old Pragotron modules."},
+  clock:{name:"Desk flip clock", desc:"Tiny and light."}
+};
+const DRUM = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;!?'\"-/&@#$%()+=ROYGBVWK".split("");
+const TILE_START = DRUM.length - 8;   // the last 8 drum positions are colour tiles
+const COLS = 22, ROWS = 6;
+const MESSAGES = [
+  ["", "   WELCOME ABOARD", "", "  NEXT STOP  GRAND", "  CENTRAL TERMINAL", ""],
+  ["{R}{O}{Y}{G}{B}{V}{R}{O}{Y}{G}{B}{V}{R}{O}{Y}{G}{B}{V}{R}{O}{Y}{G}", "", "   DINING CAR OPEN", "   UNTIL 9:30 PM", "", "{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}"],
+  ["TRAIN   DEST     TIME", "", "241     BOSTON   7:05", "118     ALBANY   7:22", "93      MONTREAL 8:10", "457     CHICAGO  9:45"],
+  ["", "  ALL ABOARD!", "", "  THIS TRAIN IS NOW", "  BOARDING ON TRACK 4", ""],
+  ["", "", "     72° SUNNY", "   HI 81   LO 64", "", ""]
+];
+let msgIndex = 0;
+
+// Parse a line into 22 drum indices; {R} etc. are colour tiles.
+function parseLine(s){
+  const out=[]; let i=0;
+  while(i<s.length && out.length<COLS){
+    const m = s.slice(i).match(/^\{([ROYGBVWK])\}/);
+    if(m){ out.push(TILE_START + "ROYGBVWK".indexOf(m[1])); i+=3; continue; }
+    const ch = s[i].toUpperCase(); const k = DRUM.indexOf(ch);
+    out.push(k >= 0 && k < TILE_START ? k : 0); i++;
+  }
+  while(out.length<COLS) out.push(0);
+  return out;
+}
+
+// ---- board DOM ----
+const boardEl = document.getElementById("board");
+const cells = [], shown = new Array(COLS*ROWS).fill(0);
+for(let i=0;i<COLS*ROWS;i++){ const c=document.createElement("div"); c.className="cell"; boardEl.appendChild(c); cells.push(c); }
+function paint(i, k){
+  if(shown[i]===k) return; shown[i]=k;
+  const c=cells[i];
+  if(k>=TILE_START){ c.className="cell tile-"+DRUM[k]; c.textContent=""; }
+  else { c.className="cell"; c.textContent=DRUM[k]; }
+}
+MESSAGES[0].map(parseLine).flat().forEach((k,i)=>paint(i,k));
+
+// ---- audio ----
+let ctx=null, master=null; const buffers={};
+function b64ToBuf(b64){ const s=atob(b64), a=new Uint8Array(s.length); for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i); return a.buffer; }
+async function ensureAudio(){
+  if(ctx) { if(ctx.state==="suspended") await ctx.resume(); return; }
+  ctx = new (window.AudioContext||window.webkitAudioContext)();
+  master = ctx.createGain(); master.connect(ctx.destination); setVol();
+  for(const [style, list] of Object.entries(SOUNDS)){
+    buffers[style] = await Promise.all(list.map(b=>ctx.decodeAudioData(b64ToBuf(b))));
+  }
+}
+function setVol(){ if(master) master.gain.value = (+vol.value/100)**1.6; }
+
+let style = "solari", scheduled = [], animStart = 0, plan = null;
+function clack(t, col, variant){
+  const list = buffers[style]; const src = ctx.createBufferSource();
+  src.buffer = list[variant ?? Math.floor(Math.random()*list.length)];
+  src.playbackRate.value = 0.96 + Math.random()*0.08;
+  const g = ctx.createGain(); g.gain.value = 0.55 + Math.random()*0.45;
+  let node = g;
+  if(pan.checked && ctx.createStereoPanner && col!=null){ const p=ctx.createStereoPanner(); p.pan.value = (col/(COLS-1))*1.4-0.7; g.connect(p); p.connect(master); }
+  else g.connect(master);
+  src.connect(g); src.start(t); scheduled.push(src);
+}
+function stopAll(){ scheduled.forEach(s=>{try{s.stop()}catch(e){}}); scheduled=[]; plan=null; }
+
+// Build a flip plan: every cell advances forward only, one flap per (flip ms x its own speed).
+function makePlan(targets, opts={}){
+  const flip = +document.getElementById("flip").value/1000, vary = +document.getElementById("vary").value/100;
+  const mode = document.getElementById("start").value;
+  const cellsPlan = [], events = [];
+  for(let i=0;i<COLS*ROWS;i++){
+    const from = shown[i], to = targets[i];
+    let steps = (to - from + DRUM.length) % DRUM.length;
+    if(opts.full && steps===0) steps = DRUM.length;
+    const speed = 1 + (Math.random()*2-1)*vary;
+    const col = i % COLS;
+    const delay = mode==="together"?0 : mode==="random"? Math.random()*0.12 : col*0.035;
+    const per = flip*speed;
+    cellsPlan.push({from, steps, per, delay});
+    for(let s=1;s<=steps;s++) events.push({t: delay + s*per, col});
+  }
+  events.sort((a,b)=>a.t-b.t);
+  return {cells:cellsPlan, events, end: events.length? events[events.length-1].t : 0};
+}
+
+async function run(targets, opts){
+  await ensureAudio(); stopAll();
+  const p = makePlan(targets, opts);
+  const t0 = ctx.currentTime + 0.08;
+  // Optional voice limit: drop a clack when 24 are still sounding (each ~90 ms long).
+  const cap = document.getElementById("cap").checked; const live=[]; let dropped=0;
+  for(const e of p.events){
+    if(cap){ while(live.length && live[0] <= e.t) live.shift(); if(live.length>=24){ dropped++; continue; } live.push(e.t+0.09); live.sort((a,b)=>a-b); }
+    clack(t0+e.t, e.col);
+  }
+  plan = p; animStart = performance.now() + 80;
+  const flips = p.events.length;
+  document.getElementById("stat").textContent = flips + " flaps over " + p.end.toFixed(1) + " s" + (cap? ", "+dropped+" dropped by the voice limit":"");
+  requestAnimationFrame(tick);
+}
+function tick(){
+  if(!plan) return;
+  const el = (performance.now()-animStart)/1000;
+  plan.cells.forEach((c,i)=>{
+    const n = Math.max(0, Math.min(c.steps, Math.floor((el - c.delay)/c.per)));
+    paint(i, (c.from + n) % DRUM.length);
+  });
+  if(el < plan.end + 0.2) requestAnimationFrame(tick); else plan=null;
+}
+
+// ---- controls ----
+const flipEl=document.getElementById("flip"), varyEl=document.getElementById("vary"), vol=document.getElementById("vol"), pan=document.getElementById("pan");
+function outs(){ document.getElementById("flipOut").textContent = flipEl.value+" ms ("+(1000/flipEl.value).toFixed(1)+" flaps/s)";
+  document.getElementById("varyOut").textContent = "±"+varyEl.value+"%"; document.getElementById("volOut").textContent = vol.value+"%"; setVol(); }
+[flipEl,varyEl,vol].forEach(e=>e.addEventListener("input",outs)); outs();
+
+document.getElementById("change").onclick = ()=>{ msgIndex=(msgIndex+1)%MESSAGES.length; run(MESSAGES[msgIndex].map(parseLine).flat()); };
+document.getElementById("full").onclick = ()=>run(shown.slice(), {full:true});
+document.getElementById("spin").onclick = async ()=>{
+  const t = shown.slice(); const mid = 2*COLS + 10;
+  for(let i=0;i<t.length;i++) t[i]=shown[i];
+  // one cell from blank round to Z
+  paint(mid, 0); t[mid] = DRUM.indexOf("Z"); run(t);
+};
+
+// ---- styles, ratings, notes ----
+let ratings = {}; try{ ratings = JSON.parse(localStorage.getItem("clackRatings")||"{}"); }catch(e){}
+const stylesEl = document.getElementById("styles");
+function renderStyles(){
+  stylesEl.innerHTML = "";
+  for(const key of Object.keys(SOUNDS)){
+    const info = STYLE_INFO[key] || {name:key, desc:""};
+    const d = document.createElement("div"); d.className="style"; d.setAttribute("role","radio"); d.tabIndex=0;
+    d.setAttribute("aria-checked", key===style ? "true":"false");
+    d.innerHTML = '<b>'+info.name+'</b><div class="stars" aria-label="Rating"></div><small>'+info.desc+'</small><div class="chips"></div>';
+    const stars = d.querySelector(".stars");
+    for(let s=1;s<=5;s++){ const b=document.createElement("button"); b.textContent="★"; b.setAttribute("aria-label", s+" star"+(s>1?"s":""));
+      if((ratings[key]||0)>=s) b.classList.add("on");
+      b.onclick=(ev)=>{ ev.stopPropagation(); ratings[key]=s; try{localStorage.setItem("clackRatings",JSON.stringify(ratings))}catch(e){} renderStyles(); }; stars.appendChild(b); }
+    const chips = d.querySelector(".chips");
+    SOUNDS[key].forEach((_,v)=>{ const c=document.createElement("button"); c.className="chip"; c.textContent=(v+1); c.setAttribute("aria-label","Play variation "+(v+1));
+      c.onclick=async (ev)=>{ ev.stopPropagation(); style=key; await ensureAudio(); clack(ctx.currentTime+0.02, null, v); renderStyles(); }; chips.appendChild(c); });
+    const pick=()=>{ style=key; renderStyles(); };
+    d.onclick=pick; d.onkeydown=(e)=>{ if(e.key===" "||e.key==="Enter"){ e.preventDefault(); pick(); } };
+    stylesEl.appendChild(d);
+  }
+  document.getElementById("notes").value = "Clack audition:\n" + Object.keys(SOUNDS).map(k=>"- "+(STYLE_INFO[k]||{name:k}).name+": "+(ratings[k]? ratings[k]+"/5":"not rated")).join("\n")
+    + "\nSettings I liked: " + flipEl.value + " ms per flap, ±" + varyEl.value + "% speed difference, start " + document.getElementById("start").value;
+}
+renderStyles();
+[flipEl,varyEl].forEach(e=>e.addEventListener("change",renderStyles)); document.getElementById("start").addEventListener("change",renderStyles);
+document.getElementById("copy").onclick = async ()=>{
+  const ta=document.getElementById("notes");
+  try{ await navigator.clipboard.writeText(ta.value); document.getElementById("copied").textContent="Copied."; }
+  catch(e){ ta.select(); document.getElementById("copied").textContent="Selected: press Copy on your keyboard."; }
+};
+</script>

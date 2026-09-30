@@ -1,0 +1,6 @@
+.pio/
+.vscode/
+__pycache__/
+scratch/
+include/secrets.h
+dist/

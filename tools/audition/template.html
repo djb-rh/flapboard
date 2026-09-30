@@ -140,12 +140,30 @@ MESSAGES[0].map(parseLine).flat().forEach((k,i)=>paint(i,k));
 // ---- audio ----
 let ctx=null, master=null; const buffers={};
 function b64ToBuf(b64){ const s=atob(b64), a=new Uint8Array(s.length); for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i); return a.buffer; }
+// Create and unlock the audio context synchronously inside the tap (some
+// browsers and embedded views only allow sound that starts in the gesture
+// itself), then decode the clips.
+let decoding = null;
+function unlockAudio(){
+  if(!ctx){
+    ctx = new (window.AudioContext||window.webkitAudioContext)();
+    master = ctx.createGain(); master.connect(ctx.destination); setVol();
+  }
+  if(ctx.state !== "running") ctx.resume();
+  const b = ctx.createBuffer(1, 1, 22050), s = ctx.createBufferSource();   // a silent blip, still in the gesture
+  s.buffer = b; s.connect(ctx.destination); s.start(0);
+}
 async function ensureAudio(){
-  if(ctx) { if(ctx.state==="suspended") await ctx.resume(); return; }
-  ctx = new (window.AudioContext||window.webkitAudioContext)();
-  master = ctx.createGain(); master.connect(ctx.destination); setVol();
-  for(const [style, list] of Object.entries(SOUNDS)){
-    buffers[style] = await Promise.all(list.map(b=>ctx.decodeAudioData(b64ToBuf(b))));
+  unlockAudio();
+  if(!decoding){
+    decoding = (async()=>{
+      for(const [style, list] of Object.entries(SOUNDS))
+        buffers[style] = await Promise.all(list.map(b=>new Promise((res,rej)=>ctx.decodeAudioData(b64ToBuf(b),res,rej))));
+    })();
+  }
+  await decoding;
+  if(ctx.state !== "running"){
+    document.getElementById("stat").textContent = "This view is blocking sound (audio is " + ctx.state + "). Open the page in Safari or Chrome instead.";
   }
 }
 function setVol(){ if(master) master.gain.value = (+vol.value/100)**1.6; }

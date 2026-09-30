@@ -31,6 +31,7 @@
 #include "net.h"
 #include "note.h"
 #include "sdcard.h"
+#include "sign.h"
 #include "status.h"
 
 namespace flapboard {
@@ -216,10 +217,22 @@ int run(const std::string &line) {
   if (c == "crc" && a.size() > 1) return cmdCrc(a[1]);
   if (c == "rm" && a.size() > 1) return remove(a[1].c_str()) == 0 ? 0 : 1;
   if (c == "mkdir" && a.size() > 1) return mkdir(a[1].c_str(), 0777) == 0 ? 0 : 1;
-  if (c == "get" && a.size() > 1) return cmdGet(a[1]);
-  if (c == "put" && a.size() > 2) return cmdPut(a[1], atol(a[2].c_str()));
-  if (c == "shot") return cmdShot();
+  // Binary transfers: keep other tasks' notes off the port meanwhile.
+  if ((c == "get" && a.size() > 1) || (c == "put" && a.size() > 2) || c == "shot") {
+    setSerialQuiet(true);
+    const int rc = c == "get" ? cmdGet(a[1]) : c == "put" ? cmdPut(a[1], atol(a[2].c_str())) : cmdShot();
+    setSerialQuiet(false);
+    return rc;
+  }
   if (c == "mem") return cmdMem();
+  if (c == "bench") {
+    sign::runBench();
+    return 0;
+  }
+  if (c == "msg" && a.size() > 1) {
+    sign::show(line.substr(line.find(' ') + 1));
+    return 0;
+  }
   if (c == "wifi" && a.size() > 1) {
     net::join(a[1], a.size() > 2 ? a[2] : "");
     return 0;

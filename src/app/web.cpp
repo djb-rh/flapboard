@@ -17,6 +17,7 @@
 #include "multipart.h"
 #include "net.h"
 #include "note.h"
+#include "sign.h"
 #include "status.h"
 
 namespace flapboard {
@@ -181,6 +182,17 @@ esp_err_t handleConfigPost(httpd_req_t *req) {
   if (!config::apply(patch.as<JsonVariantConst>(), &err)) return sendError(req, 400, err);
   note("settings changed from the web");
   return sendJson(req, 200, config::toJson());
+}
+
+// Show a message now (a test hook until Phase 5's content engine; MQTT uses
+// the same path in Phase 7). Body: {"text": "..."}.
+esp_err_t handleMessage(httpd_req_t *req) {
+  std::string body;
+  if (!readBody(req, &body, 2048)) return sendError(req, 400, "request too large");
+  JsonDocument d;
+  if (deserializeJson(d, body) || !d["text"].is<const char *>()) return sendError(req, 400, "expected {\"text\": \"...\"}");
+  sign::show(d["text"].as<std::string>());
+  return sendJson(req, 200, "{\"shown\":true}");
 }
 
 esp_err_t handleLog(httpd_req_t *req) {
@@ -447,6 +459,7 @@ void begin() {
       {"/api/config", HTTP_GET, handleConfigGet},
       {"/api/config", HTTP_POST, handleConfigPost},
       {"/api/log", HTTP_GET, handleLog},
+      {"/api/message", HTTP_POST, handleMessage},
       {"/api/reboot", HTTP_POST, handleReboot},
       {"/api/c6update", HTTP_POST, handleCoprocUpdate},
       {"/api/nets", HTTP_GET, handleNets},

@@ -1,0 +1,9 @@
+{
+  "name": "flapcore",
+  "version": "0.1.0",
+  "description": "Portable split-flap display engine: drum, message layout, flap timing, geometry and RGB565 rendering. No platform dependencies.",
+  "license": "GPL-3.0-or-later",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": { "flags": ["-std=gnu++17", "-O2"], "includeDir": "include", "srcDir": "src" }
+}

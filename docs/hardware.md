@@ -51,3 +51,25 @@ Measured with `env:probe` (`src/probe/main.cpp`, driven by `tools/probe.py`).
   Reducing a frame to an 80x45 luma grid (every 4th pixel/row): **3.6 ms**.
 - Idle scene: motion score 0% at a threshold of 12 levels (no false triggers from sensor noise).
   Detection itself not yet exercised (nobody moved in front of it).
+
+## Phase 2 drawing measurements (2026-09-30, 6x22 board, 53x74 px cells)
+Per cell, on-device `bench` (serial):
+| Step | us |
+|---|---|
+| memcpy a glyph face PSRAM -> RAM (7.8 KB) | 53 |
+| memcpy one cell into framebuffer columns | 80 |
+| cache msync of one cell's panel rows | 12 |
+| draw a landed cell (full path) | 133 |
+| draw a mid-flip cell (full path) | 235 (was 326) |
+| compose mid-flip cell into scratch only | 129 (was 222) |
+
+- M5GFX `pushImage` with rotation 3: ~0.55 ms per cell. Direct framebuffer columns (glyphs stored
+  column-major, composed straight into panel memory) plus packed RGB565 shading (2 multiplies, not 3)
+  and flapcore at -O2: ~0.23-0.28 ms per cell in real changes.
+- Real message changes (random start delay): ~70 cells moving, ~19 ms per frame, 50-60 fps.
+  Worst case (all 132 cells mid-flap, e.g. full spin): ~30 fps. Timing is clock-based, so a slow frame
+  never slows the board.
+- The display's own DMA reads the framebuffer from PSRAM (~110 MB/s at 60 Hz); memory traffic, not
+  arithmetic, is now the limit. Half-cell redraws help only once frames outpace flaps.
+- Screenshots: a note() printed by another task mid-transfer shifted the picture by one line of text;
+  notes are held off serial during shot/get/put.

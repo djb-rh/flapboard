@@ -12,7 +12,7 @@
 #include "library.h"
 #include "net.h"
 #include "note.h"
-#include "screen.h"
+#include "sign.h"
 #include "sdcard.h"
 #include "status.h"
 #include "web.h"
@@ -40,12 +40,12 @@ void setup() {
   M5.begin(cfg);
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);   // never block on a USB console nobody reads
-  screen::begin();
 
   config::begin();
   if (sdcard::begin()) makeLibraryFolders();
   else note("sd: no card (or not FAT32): the file library is unavailable");
 
+  sign::begin();
   net::begin();
   web::begin();
   // ESP-IDF's own logging goes quiet from here: with the Mac attached and
@@ -68,7 +68,6 @@ void loop() {
   M5.update();
   net::loop();
   status::update();
-  screen::loop();
   console::loop();
   if (web::takeRebootRequest()) {
     note("restarting (asked from the web)");

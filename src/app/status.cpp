@@ -10,6 +10,7 @@
 #include "config.h"
 #include "net.h"
 #include "sdcard.h"
+#include "sign.h"
 
 namespace flapboard {
 namespace status {
@@ -91,6 +92,9 @@ std::string json() {
   b["ma"] = g_batt_ma;
   xSemaphoreGive(g_mux);
   d["reset_reason"] = (int)esp_reset_reason();
+  JsonDocument sg;
+  deserializeJson(sg, sign::statsJson());
+  d["sign"] = sg;
   std::string out;
   serializeJson(d, out);
   return out;

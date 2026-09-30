@@ -1,0 +1,287 @@
+#include <unity.h>
+
+#include <string>
+#include <vector>
+
+#include "flapcore/board.h"
+#include "flapcore/drum.h"
+#include "flapcore/layout.h"
+#include "flapcore/message.h"
+#include "flapcore/render.h"
+
+using namespace flapcore;
+
+static const Drum kDrum = Drum::vestaboard();
+
+static std::string row(const std::vector<uint16_t> &g, int r, int cols) {
+  std::string s;
+  for (int c = 0; c < cols; c++) {
+    const DrumEntry &e = kDrum.at(g[r * cols + c]);
+    s += e.tile ? (char)('a' + (e.code - 'A')) : (e.cp < 128 ? (char)e.cp : '*');
+  }
+  return s;
+}
+
+void test_drum_order() {
+  TEST_ASSERT_EQUAL(65, (int)kDrum.size());   // 57 characters + 8 tiles
+  TEST_ASSERT_EQUAL(0, kDrum.indexOfChar(' '));
+  TEST_ASSERT_EQUAL(1, kDrum.indexOfChar('A'));
+  TEST_ASSERT_EQUAL(27, kDrum.indexOfChar('1'));
+  TEST_ASSERT_EQUAL(36, kDrum.indexOfChar('0'));
+  TEST_ASSERT_EQUAL(56, kDrum.indexOfChar(0xB0));   // degree sign
+  TEST_ASSERT_EQUAL(57, kDrum.indexOfTile('R'));
+  TEST_ASSERT_EQUAL(64, kDrum.indexOfTile('K'));
+  TEST_ASSERT_EQUAL(-1, kDrum.indexOfChar('a'));
+  TEST_ASSERT_FALSE(kDrum.hasLowercase());
+  TEST_ASSERT_EQUAL(64, kDrum.stepsBetween(1, 0));   // A back to blank: all the way round
+}
+
+void test_message_center_wrap_tiles() {
+  auto g = layoutMessage(kDrum, "hello|{R}{G} x", 3, 7);
+  TEST_ASSERT_EQUAL_STRING(" HELLO ", row(g, 0, 7).c_str());   // 2 lines in 3 rows: (3-2)/2 = no top pad
+  g = layoutMessage(kDrum, "hello|{R}{G} x", 4, 7);
+  TEST_ASSERT_EQUAL_STRING(" HELLO ", row(g, 1, 7).c_str());
+  TEST_ASSERT_EQUAL_STRING(" rg X  ", row(g, 2, 7).c_str());
+  g = layoutMessage(kDrum, "THE QUICK BROWN FOX", 3, 9);
+  TEST_ASSERT_EQUAL_STRING("THE QUICK", row(g, 0, 9).c_str());
+  TEST_ASSERT_EQUAL_STRING("BROWN FOX", row(g, 1, 9).c_str());
+  g = layoutMessage(kDrum, "ABCDEFGHIJ", 2, 4);   // a word longer than a row is split
+  TEST_ASSERT_EQUAL_STRING("ABCD", row(g, 0, 4).c_str());
+  TEST_ASSERT_EQUAL_STRING("EFGH", row(g, 1, 4).c_str());
+}
+
+void test_message_left_keeps_spacing_and_unknowns_blank() {
+  MessageOptions o;
+  o.align = Align::Left;
+  o.vertical_center = false;
+  auto g = layoutMessage(kDrum, "241   BOS~7:05\nX", 2, 14, o);
+  TEST_ASSERT_EQUAL_STRING("241   BOS 7:05", row(g, 0, 14).c_str());
+  TEST_ASSERT_EQUAL_STRING("X             ", row(g, 1, 14).c_str());
+  o.align = Align::Right;
+  g = layoutMessage(kDrum, "72\xC2\xB0", 1, 5, o);   // UTF-8 degree sign
+  TEST_ASSERT_EQUAL_STRING("  72*", row(g, 0, 5).c_str());
+}
+
+struct Count : FlipSink {
+  std::vector<FlipEvent> ev;
+  void onFlip(const FlipEvent &e) override { ev.push_back(e); }
+};
+
+void test_board_forward_only_constant_speed() {
+  Board b;
+  b.resize(1, 3, (int)kDrum.size());
+  Motion m;
+  m.flip_ms = 100;
+  m.speed_variance = 0;
+  m.start = StartMode::Together;
+  b.setMotion(m);
+  // A (1 step), C (3 steps), blank->blank (0 steps)
+  b.show({1, 3, 0}, 1000);
+  TEST_ASSERT_EQUAL_UINT32(1300, b.finishMs());
+  Count c;
+  b.update(1150, &c);
+  TEST_ASSERT_EQUAL(2, (int)c.ev.size());   // cell 0 landed A at 1100, cell 1 landed A at 1100
+  TEST_ASSERT_EQUAL_UINT32(1100, c.ev[0].at_ms);
+  CellView v = b.view(1, 1150);
+  TEST_ASSERT_TRUE(v.moving);
+  TEST_ASSERT_EQUAL(1, v.cur);
+  TEST_ASSERT_EQUAL(2, v.next);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, v.progress);
+  TEST_ASSERT_FALSE(b.view(0, 1150).moving);
+  b.update(2000, &c);
+  TEST_ASSERT_EQUAL(4, (int)c.ev.size());   // 1 + 3 flaps in all
+  TEST_ASSERT_EQUAL(3, b.view(1, 2000).cur);
+  TEST_ASSERT_FALSE(b.busy(2000));
+}
+
+void test_board_wraps_forward_and_full_spin() {
+  Board b;
+  b.resize(1, 1, (int)kDrum.size());
+  Motion m;
+  m.flip_ms = 10;
+  m.speed_variance = 0;
+  m.start = StartMode::Together;
+  b.setMotion(m);
+  b.jump({1});                 // showing A
+  b.show({0}, 0);              // to blank: 64 flaps forward, never backwards
+  TEST_ASSERT_EQUAL_UINT32(640, b.finishMs());
+  b.jump({5});
+  b.show({5}, 0, true);        // full spin: once round
+  TEST_ASSERT_EQUAL_UINT32(650, b.finishMs());
+}
+
+void test_board_speed_variance_is_per_module_and_bounded() {
+  Board b;
+  b.resize(1, 50, (int)kDrum.size());
+  Motion m;
+  m.flip_ms = 100;
+  m.speed_variance = 0.03f;
+  m.start = StartMode::Together;
+  b.setMotion(m);
+  std::vector<uint16_t> t(50, 10);   // everyone 10 flaps
+  b.show(t, 0);
+  TEST_ASSERT_TRUE(b.finishMs() <= 1030 + 1);
+  TEST_ASSERT_TRUE(b.finishMs() >= 1000);
+  // Same seed -> same slowest module next time too.
+  Board b2;
+  b2.resize(1, 50, (int)kDrum.size());
+  b2.setMotion(m);
+  b2.show(t, 0);
+  TEST_ASSERT_EQUAL_UINT32(b.finishMs(), b2.finishMs());
+}
+
+void test_board_retarget_mid_flap_keeps_falling_flap() {
+  Board b;
+  b.resize(1, 1, (int)kDrum.size());
+  Motion m;
+  m.flip_ms = 100;
+  m.speed_variance = 0;
+  m.start = StartMode::Together;
+  b.setMotion(m);
+  b.show({10}, 0);             // blank -> J
+  CellView v = b.view(0, 250); // mid third flap: B->C
+  TEST_ASSERT_EQUAL(2, v.cur);
+  b.show({4}, 250);            // now to D: C, D -> the falling flap (to C) continues
+  v = b.view(0, 250);
+  TEST_ASSERT_TRUE(v.moving);
+  TEST_ASSERT_EQUAL(2, v.cur);
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, v.progress);
+  TEST_ASSERT_EQUAL_UINT32(400, b.finishMs());   // lands C at 300, D at 400
+}
+
+void test_board_dirty_tracking() {
+  Board b;
+  b.resize(1, 2, (int)kDrum.size());
+  Motion m;
+  m.flip_ms = 100;
+  m.speed_variance = 0;
+  m.start = StartMode::Together;
+  b.setMotion(m);
+  TEST_ASSERT_TRUE(b.takeDirty(0, 0));   // fresh board: draw everything once
+  TEST_ASSERT_FALSE(b.takeDirty(0, 0));
+  b.show({2, 0}, 0);
+  TEST_ASSERT_TRUE(b.takeDirty(0, 50));
+  TEST_ASSERT_TRUE(b.takeDirty(0, 150));
+  TEST_ASSERT_TRUE(b.takeDirty(0, 250));   // landed: drawn once more
+  TEST_ASSERT_FALSE(b.takeDirty(0, 300));
+  TEST_ASSERT_TRUE(b.takeDirty(1, 50));    // from resize
+  TEST_ASSERT_FALSE(b.takeDirty(1, 60));   // never moves
+}
+
+void test_layout_auto_fit_and_sides() {
+  LayoutInput in;
+  LayoutResult r = computeLayout(in);   // 6x22 on 1280x720
+  TEST_ASSERT_TRUE(r.fits);
+  TEST_ASSERT_TRUE(r.board.x >= in.margin);
+  TEST_ASSERT_TRUE(r.board.x + r.board.w <= 1280 - in.margin);
+  TEST_ASSERT_TRUE(r.board.y + r.board.h <= 720 - in.margin);
+  TEST_ASSERT_EQUAL(r.cell_w * 22 + 21 * in.gap, r.board.w);
+  in.left_image = in.right_image = true;
+  LayoutResult s = computeLayout(in);
+  TEST_ASSERT_TRUE(s.cell_w < r.cell_w);
+  TEST_ASSERT_TRUE(s.left.w > 0 && s.right.w > 0);
+  TEST_ASSERT_TRUE(s.left.x + s.left.w <= s.board.x);
+  TEST_ASSERT_TRUE(s.board.x + s.board.w <= s.right.x);
+  in.left_image = in.right_image = false;
+  in.flap_w = 500;   // too big: shrunk to fit, flagged
+  LayoutResult f = computeLayout(in);
+  TEST_ASSERT_FALSE(f.fits);
+  TEST_ASSERT_EQUAL(r.cell_w, f.cell_w);
+  in.rows = 3;
+  in.cols = 10;
+  in.flap_w = 60;    // fixed and small: honoured, centred
+  LayoutResult x = computeLayout(in);
+  TEST_ASSERT_TRUE(x.fits);
+  TEST_ASSERT_EQUAL(60, x.cell_w);
+  TEST_ASSERT_EQUAL(84, x.cell_h);
+}
+
+// A font without a font file: every character is a filled box whose size
+// depends on the code point, so different glyphs really differ.
+struct BoxFont : FontRaster {
+  int cap = 10;
+  void setCapHeight(int c) override { cap = c; }
+  bool render(uint32_t cp, GlyphBitmap *g) override {
+    g->w = 3 + cp % 7;
+    g->h = cap;
+    g->top = -cap;
+    g->alpha.assign((size_t)g->w * g->h, 0);
+    for (int i = 0; i < g->w * g->h; i++) g->alpha[i] = (uint8_t)((i * 37 + cp) & 0xFF);
+    return true;
+  }
+};
+
+struct RowSurface : Surface {
+  int W, H;
+  std::vector<uint16_t> px;
+  RowSurface(int w, int h) : W(w), H(h), px((size_t)w * h, 0) {}
+  void blit(int x, int y, int w, int h, const uint16_t *s) override {
+    for (int r = 0; r < h; r++)
+      for (int c = 0; c < w; c++) px[(size_t)(y + r) * W + x + c] = s[(size_t)r * w + c];
+  }
+  void fill(int, int, int, int, uint16_t) override {}
+};
+
+// Memory laid out column after column, like the Tab5 panel in landscape.
+struct ColumnSurface : RowSurface {
+  std::vector<uint16_t> cols;
+  int done = 0;
+  ColumnSurface(int w, int h) : RowSurface(w, h), cols((size_t)w * h, 0) {}
+  uint16_t *column(int x, int y) override { return &cols[(size_t)x * H + y]; }
+  void columnsDone(int, int, int, int) override { done++; }
+  uint16_t at(int x, int y) const { return cols[(size_t)x * H + y]; }
+};
+
+void test_column_path_matches_row_path() {
+  BoxFont font;
+  const Theme theme;
+  LayoutInput in;
+  in.screen_w = 400;
+  in.screen_h = 200;
+  in.rows = 2;
+  in.cols = 5;
+  const LayoutResult lay = computeLayout(in);
+  GlyphSet rows_g, cols_g;
+  TEST_ASSERT_TRUE(rows_g.build(kDrum, theme, font, lay.cell_w, lay.cell_h));
+  TEST_ASSERT_TRUE(cols_g.build(kDrum, theme, font, lay.cell_w, lay.cell_h, 0.62f, true));
+  Renderer rr, rc;
+  rr.setup(lay, &rows_g, theme);
+  rc.setup(lay, &cols_g, theme);
+  RowSurface a(400, 200);
+  ColumnSurface b(400, 200);
+  const float progress[] = {0.0f, 0.1f, 0.3f, 0.49f, 0.5f, 0.51f, 0.75f, 0.95f};
+  for (float p : progress) {
+    CellView v;
+    v.cur = 5;
+    v.next = 6;
+    v.moving = p > 0;
+    v.progress = p;
+    rr.drawCell(a, 1, 3, v);
+    rc.drawCell(b, 1, 3, v);
+    const Rect r = lay.cell(1, 3);
+    for (int y = r.y; y < r.y + r.h; y++)
+      for (int x = r.x; x < r.x + r.w; x++) {
+        if (a.px[(size_t)y * 400 + x] != b.at(x, y)) {
+          char m[80];
+          snprintf(m, sizeof(m), "progress %.2f differs at cell pixel %d,%d", p, x - r.x, y - r.y);
+          TEST_FAIL_MESSAGE(m);
+        }
+      }
+  }
+  TEST_ASSERT_EQUAL(8, b.done);
+}
+
+int main() {
+  UNITY_BEGIN();
+  RUN_TEST(test_drum_order);
+  RUN_TEST(test_message_center_wrap_tiles);
+  RUN_TEST(test_message_left_keeps_spacing_and_unknowns_blank);
+  RUN_TEST(test_board_forward_only_constant_speed);
+  RUN_TEST(test_board_wraps_forward_and_full_spin);
+  RUN_TEST(test_board_speed_variance_is_per_module_and_bounded);
+  RUN_TEST(test_board_retarget_mid_flap_keeps_falling_flap);
+  RUN_TEST(test_board_dirty_tracking);
+  RUN_TEST(test_layout_auto_fit_and_sides);
+  RUN_TEST(test_column_path_matches_row_path);
+  return UNITY_END();
+}

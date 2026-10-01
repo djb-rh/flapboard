@@ -57,6 +57,7 @@ void setupPin() {
   if (pin == g_pin && high == g_active_high) return;
   if (g_pin >= 0) pinMode(g_pin, INPUT);   // release the old pin
   g_pin = -1;
+  g_relay = false;
   g_active_high = high;
   if (pin >= 0 && !allowed(pin)) {
     note("power: GPIO %d is not free on the Tab5; relay disabled", pin);
@@ -162,7 +163,7 @@ void loop() {
   const bool testing = g_relay_test_until && (int32_t)(millis() - g_relay_test_until) < 0;
   if (!testing) g_relay_test_until = 0;
   const bool relay = g_on || testing;
-  if (relay != g_relay) driveRelay(relay);
+  if (g_pin >= 0 && relay != g_relay) driveRelay(relay);
 }
 
 bool isOn() { return g_on; }
@@ -187,7 +188,7 @@ std::string statusJson() {
   d["reason"] = g_reason;
   d["held_off"] = g_latch;
   d["relay_pin"] = g_pin;
-  d["relay_on"] = g_relay;
+  d["relay_on"] = g_pin >= 0 && g_relay;
   d["woken_for_s"] = g_wake_until && (int32_t)(millis() - g_wake_until) < 0 ? (g_wake_until - millis()) / 1000 : 0;
   std::string out;
   serializeJson(d, out);

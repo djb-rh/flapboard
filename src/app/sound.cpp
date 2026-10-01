@@ -34,6 +34,7 @@ constexpr uint8_t kChannel = 0;
 flapcore::ClackMixer g_mix;
 volatile int g_volume = 60;
 volatile bool g_enabled = true;
+volatile bool g_suppressed = false;
 volatile uint32_t g_save_at = 0;   // when to write the changed level to the settings
 volatile bool g_reload = false;
 std::vector<int16_t *> g_owned;   // clips loaded from the card (PSRAM)
@@ -179,7 +180,7 @@ void audioTask(void *) {
       applyConfig(&enabled);
       last_cfg = millis();
     }
-    enabled = g_enabled;
+    enabled = g_enabled && !g_suppressed;
     if (!enabled) {
       next_ms = millis() + 2 * block_ms;
       g_mix.render(buf[0], kBlock, next_ms - 1000);   // drain events silently
@@ -253,6 +254,7 @@ void setEnabled(bool on) {
 }
 
 int volume() { return g_volume; }
+void setSuppressed(bool quiet) { g_suppressed = quiet; }
 bool enabled() { return g_enabled; }
 
 void capture(const std::string &path, float seconds) {

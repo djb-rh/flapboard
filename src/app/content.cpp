@@ -14,6 +14,7 @@
 #include "clock.h"
 #include "config.h"
 #include "net.h"
+#include "schedule.h"
 #include "note.h"
 #include "sdcard.h"
 #include "sign.h"
@@ -130,23 +131,76 @@ bool lookup(const std::string &name, const std::string &arg, std::string *out) {
   return weather::field(name, out);
 }
 
+// The scheduler decides which program runs; the clock and weather layouts
+// are global settings.
 struct Program {
   std::string source = "messages", order = "random", text, clock_tpl, weather_tpl;
   std::vector<std::string> files;
   int dwell = 20;
 };
 
+schedule::Program programFrom(JsonVariantConst v) {
+  schedule::Program p;
+  p.source = v["source"] | "";
+  p.order = v["order"] | "random";
+  p.text = v["text"] | "";
+  p.dwell = v["dwell"] | 20;
+  for (JsonVariantConst f : v["files"].as<JsonArrayConst>()) p.files.push_back(f.as<std::string>());
+  return p;
+}
+
+std::vector<schedule::Rule> rulesFrom(JsonVariantConst arr) {
+  std::vector<schedule::Rule> out;
+  for (JsonVariantConst v : arr.as<JsonArrayConst>()) {
+    schedule::Rule r;
+    r.name = v["name"] | "";
+    r.date = v["date"] | "";
+    r.start = v["start"] | "";
+    r.end = v["end"] | "";
+    for (JsonVariantConst d : v["days"].as<JsonArrayConst>()) r.days.push_back(d.as<int>());
+    r.program = programFrom(v["program"]);
+    out.push_back(r);
+  }
+  return out;
+}
+
+std::string g_reason = "default";
+
 Program readProgram() {
   Program p;
-  config::Reader r;
-  auto &d = r.doc();
-  p.source = d["content_source"] | "messages";
-  p.order = d["content_order"] | "random";
-  p.dwell = std::max(3, (int)(d["content_dwell"] | 20));
-  p.text = d["content_text"] | "";
-  p.clock_tpl = d["clock_template"] | "{time}|{date}";
-  p.weather_tpl = d["weather_template"] | "{place}|NOW {temp}° {cond}|HI {hi}  LO {lo}";
-  for (JsonVariantConst v : d["content_files"].as<JsonArrayConst>()) p.files.push_back(v.as<std::string>());
+  schedule::Program def;
+  bool enabled;
+  std::vector<schedule::Rule> rules, overrides;
+  {
+    config::Reader r;
+    auto &d = r.doc();
+    def.source = d["content_source"] | "messages";
+    def.order = d["content_order"] | "random";
+    def.dwell = d["content_dwell"] | 20;
+    def.text = d["content_text"] | "";
+    for (JsonVariantConst v : d["content_files"].as<JsonArrayConst>()) def.files.push_back(v.as<std::string>());
+    p.clock_tpl = d["clock_template"] | "{time}|{date}";
+    p.weather_tpl = d["weather_template"] | "{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}";
+    enabled = d["schedule_enabled"] | false;
+    rules = rulesFrom(d["schedule_rules"]);
+    overrides = rulesFrom(d["schedule_overrides"]);
+  }
+  schedule::Now now;
+  struct tm t;
+  if (clock::localNow(&t)) {
+    now.year = t.tm_year + 1900;
+    now.month = t.tm_mon + 1;
+    now.day = t.tm_mday;
+    now.weekday = (t.tm_wday + 6) % 7;
+    now.minutes = t.tm_hour * 60 + t.tm_min;
+  }
+  const schedule::Choice c = schedule::chooseProgram(def, enabled, rules, overrides, clock::trusted(), now);
+  g_reason = c.reason;
+  p.source = c.program.source;
+  p.order = c.program.order;
+  p.text = c.program.text;
+  p.files = c.program.files;
+  p.dwell = std::max(3, c.program.dwell);
   return p;
 }
 
@@ -249,6 +303,7 @@ void loop() {
 std::string statusJson() {
   JsonDocument d;
   d["source"] = g_source;
+  d["reason"] = g_reason;
   d["messages"] = (int)g_lib.size();
   d["current"] = g_cur.text;
   d["file"] = g_cur.file;

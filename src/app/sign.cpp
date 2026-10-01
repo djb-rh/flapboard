@@ -243,6 +243,7 @@ void drawSideImage(const Rect &r, const std::string &rel, const Settings &s) {
 
 // ---- quick panel ------------------------------------------------------------
 volatile bool g_panel_req = false, g_panel_open = false;
+volatile bool g_active = true, g_was_active = true;
 volatile int g_tap_x = -1, g_tap_y = -1;
 uint32_t g_panel_until = 0;
 
@@ -500,6 +501,16 @@ void renderTask(void *) {
       redrawAll(st);
     }
     st.board.update(now, &g_flips, sound::kLookaheadMs);   // landings reported early: clacks land on their sample
+    if (!g_active) {   // dark: keep the board's time, draw nothing
+      g_was_active = false;
+      g_panel_open = false;
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+    if (!g_was_active) {
+      g_was_active = true;
+      redrawAll(st);
+    }
     const int64_t a = esp_timer_get_time();
     st.surf.blit_us = st.surf.sync_us = 0;
     int n = 0;
@@ -567,6 +578,7 @@ void show(const std::string &text, int align, bool vertical_center) {
 
 void runBench() { g_bench = true; }
 void openPanel() { g_panel_req = true; }
+void setActive(bool active) { g_active = active; }
 bool panelOpen() { return g_panel_open; }
 void panelTap(int x, int y) {
   g_tap_y = y;

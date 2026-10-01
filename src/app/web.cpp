@@ -6,6 +6,7 @@
 #include <esp_http_server.h>
 #include <sys/stat.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <string>
@@ -20,6 +21,7 @@
 #include "library.h"
 #include "multipart.h"
 #include "net.h"
+#include "power.h"
 #include "note.h"
 #include "sign.h"
 #include "sound.h"
@@ -301,6 +303,24 @@ esp_err_t handleWeather(httpd_req_t *req) {
   if (req->method == HTTP_POST) weather::refreshNow();
   return sendJson(req, 200, weather::statusJson());
 }
+
+// {"state": "off"} holds the sign (and the car's lights) off until
+// {"state": "on"}; {"relay_test": 3} switches the relay on for 3 s.
+esp_err_t handlePower(httpd_req_t *req) {
+  if (req->method == HTTP_POST) {
+    std::string body;
+    if (!readBody(req, &body, 256)) return sendError(req, 400, "request too large");
+    JsonDocument d;
+    if (deserializeJson(d, body)) return sendError(req, 400, "invalid JSON");
+    const std::string st = d["state"] | "";
+    if (st == "off") power::requestLatch(true);
+    else if (st == "on") power::requestLatch(false);
+    if (d["relay_test"].is<int>()) power::testRelay(std::min(30, std::max(1, d["relay_test"].as<int>())));
+  }
+  return sendJson(req, 200, power::statusJson());
+}
+
+esp_err_t handleSchedulePage(httpd_req_t *req) { return sendAsset(req, "/schedule.html"); }
 
 esp_err_t handleMessagesPage(httpd_req_t *req) { return sendAsset(req, "/messages.html"); }
 esp_err_t handleClockPage(httpd_req_t *req) { return sendAsset(req, "/clock.html"); }
@@ -599,6 +619,9 @@ void begin() {
       {"/api/weather", HTTP_GET, handleWeather},
       {"/api/weather", HTTP_POST, handleWeather},
       {"/messages", HTTP_GET, handleMessagesPage},
+      {"/schedule", HTTP_GET, handleSchedulePage},
+      {"/api/power", HTTP_GET, handlePower},
+      {"/api/power", HTTP_POST, handlePower},
       {"/clock", HTTP_GET, handleClockPage},
       {"/api/volume", HTTP_POST, handleVolume},
       {"/api/reboot", HTTP_POST, handleReboot},

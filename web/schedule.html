@@ -1,0 +1,103 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Schedule - FlapBoard</title><link rel="stylesheet" href="/style.css">
+<style>
+.rule{border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:10px;background:var(--panel2)}
+.rule .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.rule .top input.nm{flex:1;min-width:140px}
+.days{display:flex;gap:4px;flex-wrap:wrap;margin-top:8px}.days label{display:flex;align-items:center;gap:4px;margin:0;padding:4px 8px;border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:13px;background:var(--panel)}
+.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:4px 12px;margin-top:4px}
+.files{display:flex;gap:4px 12px;flex-wrap:wrap}.files label{display:flex;gap:5px;align-items:center;margin:0;color:var(--text);font-size:13px}
+.state{font-size:17px;margin:0}.state b{font-weight:600}.hint{font-size:13px;color:var(--dim);margin:6px 0 0}
+button.mini{padding:5px 9px;font-size:13px}
+.savebar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center}
+</style></head><body>
+<header><div class="in"><b id="name">FlapBoard</b>
+<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/schedule" class="on">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<main><div id="note"></div>
+<section class="card"><h2>Right now</h2>
+<p class="state" id="showing">...</p><p class="state" id="power" style="margin-top:6px">...</p>
+<div class="row"><button class="danger" id="off">Turn off (stays off)</button><button class="sec" id="on">Turn on</button></div>
+<p class="hint">"Turn off" holds the display and the car's lights off, even through a restart, until "Turn on". Home Assistant will use the same switch. Turning on returns control to the sleep hours below.</p></section>
+
+<section class="card"><h2>Weekly schedule</h2>
+<label class="check" style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="schedule_enabled" style="width:auto"> Use the schedule</label>
+<p class="hint">When no rule matches, the sign shows what is set on the <a href="/messages">Messages</a> page. Rules are checked top to bottom and the first match wins; one-off dates come before all of them. Times may run past midnight (22:00 to 06:00).</p>
+<div id="rules"></div><div class="row"><button class="sec" id="addrule">Add a rule</button></div></section>
+
+<section class="card"><h2>One-off dates</h2><div id="overrides"></div><div class="row"><button class="sec" id="addover">Add a date</button></div></section>
+
+<section class="card"><h2>Sleep hours</h2>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="sleep_enabled" style="width:auto"> Turn the display and lights off during these hours</label>
+<div id="sleep"></div><div class="row"><button class="sec" id="addsleep">Add sleep hours</button></div>
+<p class="hint">A tap on the dark screen lights it for a few minutes. Until the clock is known (a minute after the very first start) the sign stays on rather than sitting dark.</p></section>
+
+<section class="card"><h2>Screen and lights</h2><div class="g">
+<div><label for="brightness">Brightness (%)</label><input id="brightness" type="number" min="5" max="100"></div>
+<div><label for="tap_wake_minutes">A tap wakes it for (minutes, 0 = never)</label><input id="tap_wake_minutes" type="number" min="0" max="120"></div>
+<div><label for="relay_pin">Lights relay on</label><select id="relay_pin">
+<option value="-1">No relay</option><option value="53">G53: Grove Port A (Relay unit)</option><option value="54">G54: Grove Port A, white wire</option>
+<option value="2">G2: M5-Bus</option><option value="3">G3: M5-Bus</option><option value="4">G4: M5-Bus</option><option value="16">G16: M5-Bus</option>
+<option value="17">G17: M5-Bus</option><option value="18">G18: M5-Bus</option><option value="45">G45: M5-Bus</option><option value="47">G47: M5-Bus</option>
+<option value="48">G48: M5-Bus</option><option value="51">G51: M5-Bus</option><option value="52">G52: M5-Bus</option></select></div>
+<div><label for="relay_active_high">Relay switches on when the pin is</label><select id="relay_active_high"><option value="1">High (most modules)</option><option value="0">Low</option></select></div>
+</div><div class="row"><button class="sec" id="test">Test the relay (3 s)</button><span class="dim" id="relaystate"></span></div>
+<p class="hint">The relay follows the display: on together, off together. Use an opto-isolated relay module (or M5Stack's Relay unit on Port A), never a bare relay coil on the pin; if the car's lights run on mains power, the relay and its wiring must be rated and enclosed for it.</p></section>
+
+<div class="savebar"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>({ok:r.ok,d:await r.json()}));
+const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+const SOURCES={messages:'Messages',clock:'The clock',weather:'The weather',text:'One message'};
+let files=[],data={rules:[],overrides:[],sleep:[]},saved='';
+function prog(p){p=p||{};return {source:p.source||'messages',files:p.files||[],order:p.order||'random',dwell:p.dwell||20,text:p.text||''}}
+function ruleHtml(kind,r,i){
+  const id=kind+i,p=prog(r.program);
+  let h='<div class="rule" data-kind="'+kind+'" data-i="'+i+'"><div class="top"><input class="nm" data-f="name" placeholder="Name (shown as the reason)" value="'+esc(r.name)+'">';
+  if(kind!=='sleep')h+='<button class="sec mini" data-act="up" title="Earlier = higher priority">Up</button><button class="sec mini" data-act="down">Down</button>';
+  h+='<button class="danger mini" data-act="del">Remove</button></div>';
+  if(kind==='overrides')h+='<div class="g"><div><label>Date</label><input type="date" data-f="date" value="'+esc(r.date)+'"></div>';
+  else{h+='<div class="days">'+DAYS.map((d,k)=>'<label><input type="checkbox" data-day="'+k+'"'+((r.days||[]).includes(k)?' checked':'')+'>'+d+'</label>').join('')+'</div><p class="hint" style="margin-top:4px">No days ticked = every day.</p><div class="g">'}
+  h+='<div><label>From</label><input type="time" data-f="start" value="'+esc(r.start)+'"></div><div><label>Until</label><input type="time" data-f="end" value="'+esc(r.end)+'"></div>';
+  if(kind!=='sleep'){h+='<div><label>Show</label><select data-p="source">'+Object.entries(SOURCES).map(([k,v])=>'<option value="'+k+'"'+(p.source===k?' selected':'')+'>'+v+'</option>').join('')+'</select></div>';
+    h+='<div data-only="messages"><label>Order</label><select data-p="order"><option value="random"'+(p.order==='random'?' selected':'')+'>Random</option><option value="sequential"'+(p.order==='sequential'?' selected':'')+'>In file order</option></select></div>';
+    h+='<div data-only="messages"><label>Seconds each</label><input type="number" min="3" data-p="dwell" value="'+p.dwell+'"></div></div>';
+    h+='<div data-only="messages"><label>Files (none = all)</label><div class="files">'+files.map(f=>'<label><input type="checkbox" data-file="'+esc(f)+'"'+(p.files.includes(f)?' checked':'')+'>'+esc(f)+'</label>').join('')+'</div></div>';
+    h+='<div data-only="text"><label>Message</label><input data-p="text" value="'+esc(p.text)+'"></div>';
+  }else h+='</div>';
+  if(kind!=='sleep')h+='<p class="hint">Leave both times empty for all day.</p>';
+  return h+'</div>'}
+function render(){for(const k of ['rules','overrides','sleep'])$('#'+k).innerHTML=data[k].map((r,i)=>ruleHtml(k,r,i)).join('')||'<p class="hint">None yet.</p>';
+  document.querySelectorAll('.rule').forEach(el=>{const show=()=>{const s=(el.querySelector('[data-p=source]')||{}).value;el.querySelectorAll('[data-only]').forEach(x=>x.hidden=x.dataset.only!==s)};show();
+    el.querySelector('[data-p=source]')?.addEventListener('change',show)});dirty()}
+function collect(){for(const k of ['rules','overrides','sleep']){data[k]=[...document.querySelectorAll('.rule[data-kind='+k+']')].map(el=>{
+  const r={name:el.querySelector('[data-f=name]').value.trim(),start:el.querySelector('[data-f=start]').value,end:el.querySelector('[data-f=end]').value};
+  if(k==='overrides')r.date=el.querySelector('[data-f=date]').value;else r.days=[...el.querySelectorAll('[data-day]:checked')].map(c=>+c.dataset.day);
+  if(k!=='sleep'){const g=n=>el.querySelector('[data-p='+n+']').value;r.program={source:g('source'),order:g('order'),dwell:+g('dwell')||20,text:g('text'),files:[...el.querySelectorAll('[data-file]:checked')].map(c=>c.dataset.file)}}
+  return r})}}
+function body(){collect();return {schedule_enabled:$('#schedule_enabled').checked,schedule_rules:data.rules,schedule_overrides:data.overrides,sleep_enabled:$('#sleep_enabled').checked,sleep_rules:data.sleep,
+  brightness:+$('#brightness').value,tap_wake_minutes:+$('#tap_wake_minutes').value,relay_pin:+$('#relay_pin').value,relay_active_high:$('#relay_active_high').value==='1'}}
+function dirty(){$('#dirty').textContent=JSON.stringify(body())!==saved?'Unsaved changes':''}
+document.addEventListener('click',e=>{const b=e.target.closest('[data-act]');if(!b)return;collect();const el=b.closest('.rule'),k=el.dataset.kind,i=+el.dataset.i,a=data[k];
+  if(b.dataset.act==='del')a.splice(i,1);else if(b.dataset.act==='up'&&i>0)[a[i-1],a[i]]=[a[i],a[i-1]];else if(b.dataset.act==='down'&&i<a.length-1)[a[i+1],a[i]]=[a[i],a[i+1]];render()});
+document.addEventListener('input',dirty);document.addEventListener('change',dirty);
+$('#addrule').onclick=()=>{collect();data.rules.push({name:'',days:[0,1,2,3,4],start:'07:00',end:'10:00',program:{source:'clock'}});render()};
+$('#addover').onclick=()=>{collect();data.overrides.push({name:'',date:new Date().toISOString().slice(0,10),start:'',end:'',program:{source:'text',text:'HAPPY HOLIDAYS'}});render()};
+$('#addsleep').onclick=()=>{collect();data.sleep.push({name:'Overnight',days:[],start:'23:00',end:'06:30'});render()};
+$('#save').onclick=async()=>{const b=body();const r=await post('/api/config',b);if(!r.ok){note('err',r.d.error);return}saved=JSON.stringify(b);dirty();note('ok','Saved.');setTimeout(status,1500)};
+$('#off').onclick=async()=>{await post('/api/power',{state:'off'});note('ok','Turned off. It stays off until you turn it on.');setTimeout(status,800)};
+$('#on').onclick=async()=>{await post('/api/power',{state:'on'});note('ok','Turned on (sleep hours still apply).');setTimeout(status,800)};
+$('#test').onclick=async()=>{await post('/api/power',{relay_test:3});note('ok','Relay on for 3 seconds.');setTimeout(status,500)};
+async function status(){try{const s=await (await fetch('/api/status')).json();$('#name').textContent=s.device_name;const c=s.content,p=s.power;
+  $('#showing').innerHTML='Showing <b>'+esc(SOURCES[c.source]||c.source)+'</b> because <b>'+esc(c.reason)+'</b>'+(c.override?' (a message from outside is on top)':'')+'.';
+  $('#power').innerHTML='Display and lights are <b>'+(p.on?'on':'off')+'</b>: '+esc(p.reason)+(p.held_off?' (held off)':'')+'.';
+  $('#relaystate').textContent=p.relay_pin<0?'No relay set.':'Relay on G'+p.relay_pin+' is '+(p.relay_on?'on':'off')+'.'}catch(e){}}
+(async()=>{const c=await (await fetch('/api/config')).json();
+  try{const d=await (await fetch('/library/list?path=messages')).json();files=d.entries.filter(e=>!e.dir&&/\.txt$/i.test(e.name)).map(e=>e.name)}catch(e){}
+  data={rules:c.schedule_rules||[],overrides:c.schedule_overrides||[],sleep:c.sleep_rules||[]};
+  $('#schedule_enabled').checked=c.schedule_enabled;$('#sleep_enabled').checked=c.sleep_enabled;$('#brightness').value=c.brightness;$('#tap_wake_minutes').value=c.tap_wake_minutes;
+  $('#relay_pin').value=String(c.relay_pin);$('#relay_active_high').value=c.relay_active_high?'1':'0';render();saved=JSON.stringify(body());dirty();status();setInterval(status,4000)})();
+</script></body></html>

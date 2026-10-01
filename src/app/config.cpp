@@ -58,7 +58,16 @@ constexpr const char *kDefaults = R"JSON({
   "weather_lon": 0.0,
   "weather_place": "",
   "units": "imperial",
-  "weather_minutes": 15
+  "weather_minutes": 15,
+  "schedule_enabled": false,
+  "schedule_rules": [],
+  "schedule_overrides": [],
+  "sleep_enabled": false,
+  "sleep_rules": [],
+  "brightness": 80,
+  "tap_wake_minutes": 5,
+  "relay_pin": -1,
+  "relay_active_high": true
 })JSON";
 
 JsonDocument g_doc;

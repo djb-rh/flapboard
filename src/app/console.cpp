@@ -30,6 +30,7 @@
 #include "config.h"
 #include "content.h"
 #include "net.h"
+#include "power.h"
 #include "note.h"
 #include "sdcard.h"
 #include "sign.h"
@@ -228,6 +229,10 @@ int run(const std::string &line) {
   }
   if (c == "mem") return cmdMem();
   // Touch stand-ins for testing without a finger: what a long press / tap does.
+  if (c == "wake") {   // what a tap on the dark screen does
+    power::wake();
+    return 0;
+  }
   if (c == "hold") {
     sign::openPanel();
     return 0;

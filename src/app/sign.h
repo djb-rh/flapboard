@@ -16,6 +16,9 @@ void runBench();                           // serial 'bench': time the drawing s
 // The quick panel (long press anywhere): volume, mute, the sign's address.
 // Touch is read by the main loop and handed over; the render task draws.
 void openPanel();
+// Display off (sleep hours, "off" from Home Assistant): stop drawing; on
+// again: redraw everything. The board keeps time meanwhile.
+void setActive(bool active);
 bool panelOpen();
 void panelTap(int x, int y);
 

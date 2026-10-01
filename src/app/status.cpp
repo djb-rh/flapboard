@@ -9,6 +9,7 @@
 
 #include "config.h"
 #include "content.h"
+#include "power.h"
 #include "weather.h"
 #include "net.h"
 #include "sdcard.h"
@@ -107,6 +108,9 @@ std::string json() {
   deserializeJson(ct, content::statusJson());
   deserializeJson(wx, weather::statusJson());
   d["content"] = ct;
+  JsonDocument pw;
+  deserializeJson(pw, power::statusJson());
+  d["power"] = pw;
   d["weather"] = wx;
   std::string out;
   serializeJson(d, out);

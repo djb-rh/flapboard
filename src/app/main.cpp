@@ -13,6 +13,7 @@
 #include "console.h"
 #include "library.h"
 #include "net.h"
+#include "power.h"
 #include "note.h"
 #include "sign.h"
 #include "sound.h"
@@ -39,13 +40,16 @@ void makeLibraryFolders() {
 }  // namespace
 
 void setup() {
+  // Settings first, so the relay pin is driven OFF before anything else runs:
+  // a reboot must never flash the car's lights.
+  config::begin();
+  power::beginEarly();
   auto cfg = M5.config();
   cfg.output_power = false;   // every outgoing rail stays off (Tab5 lesson)
   M5.begin(cfg);
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);   // never block on a USB console nobody reads
 
-  config::begin();
   if (sdcard::begin()) makeLibraryFolders();
   else note("sd: no card (or not FAT32): the file library is unavailable");
 
@@ -78,6 +82,10 @@ void setup() {
 void handleTouch() {
   if (M5.Touch.getCount() == 0 && !M5.Touch.getDetail().wasReleased()) return;
   const auto t = M5.Touch.getDetail();
+  if (!power::isOn()) {   // dark: a tap only wakes it
+    if (t.wasPressed()) power::wake();
+    return;
+  }
   if (sign::panelOpen()) {
     if (t.wasClicked() || t.wasHold()) sign::panelTap(t.x, t.y);
   } else if (t.wasHold()) {
@@ -93,6 +101,7 @@ void loop() {
   sound::loop();
   clock::loop();
   content::loop();
+  power::loop();
   status::update();
   console::loop();
   if (web::takeRebootRequest()) {

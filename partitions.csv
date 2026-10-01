@@ -1,14 +1,16 @@
 # FlapBoard — 16 MB ESP32-P4 flash layout.
-# Two 6 MB app slots for over-the-air updates (Phase 10), ~3.8 MB of LittleFS
-# for config.json and small built-in assets, and 64 KB for a core dump at the
-# very end (the prebuilt core has core dumps to flash enabled; without this
-# partition every crash is lost). The data partition keeps the name "spiffs":
-# that is the label Arduino's LittleFS.begin() looks for (as in Tabulous5).
+# Two 6 MB app slots for over-the-air updates (Phase 10), a 256 KB NVS
+# partition "cfg" for the settings, and 64 KB for a core dump at the very end
+# (the prebuilt core has core dumps to flash enabled; without it every crash
+# is lost). The settings moved from LittleFS to NVS in Phase 7: the prebuilt
+# framework allows only 8 VFS entries and the camera needs two of them, so a
+# mounted filesystem used for one small file was the one to give up. The
+# rest of the old LittleFS area is left free.
 # Name,     Type, SubType,  Offset,   Size
 nvs,        data, nvs,      0x9000,   0x5000,
 otadata,    data, ota,      0xe000,   0x2000,
 phy_init,   data, phy,      0x10000,  0x1000,
 ota_0,      app,  ota_0,    0x20000,  0x600000,
 ota_1,      app,  ota_1,    0x620000, 0x600000,
-spiffs,     data, spiffs,   0xc20000, 0x3d0000,
+cfg,        data, nvs,      0xc20000, 0x40000,
 coredump,   data, coredump, 0xff0000, 0x10000,

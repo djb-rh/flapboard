@@ -23,6 +23,8 @@ void loop();    // main loop: about once a second
 // `seconds` (0 = until another one or clearOverride()), then the program resumes.
 void showOverride(const std::string &text, int seconds);
 void clearOverride();
+void next();                  // move on to the next message now (Home Assistant's button)
+std::string overrideText();   // the message from outside on top right now, or ""
 void libraryChanged();   // a message file was edited or uploaded
 
 std::string statusJson();

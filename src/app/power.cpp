@@ -5,10 +5,13 @@
 #include <M5Unified.h>
 #include <Preferences.h>
 
+#include <algorithm>
+
 #include "clock.h"
 #include "config.h"
 #include "note.h"
 #include "schedule.h"
+#include "motion.h"
 #include "sign.h"
 #include "sound.h"
 
@@ -31,6 +34,7 @@ bool g_active_high = true;
 bool g_relay = false;
 int g_brightness = -1;
 std::string g_reason = "starting";
+int g_ext5v = -1;   // Port A / M5-Bus 5 V rail: -1 unknown, 0 off, 1 on
 
 bool allowed(int pin) {
   for (int p : kAllowed)
@@ -136,12 +140,23 @@ void loop() {
     note("power: %s", g_latch ? "turned off (held until turned on again)" : "off-hold released");
   }
   setupPin();
+  // A relay module needs power: Grove Port A's red wire (and the M5-Bus 5 V
+  // pin) is a switched rail, off at boot (output_power = false). On while a
+  // relay is configured. This is an IO-expander write, so it lives here on
+  // the main loop.
+  const int want5v = g_pin >= 0 ? 1 : 0;
+  if (want5v != g_ext5v) {
+    M5.Power.setExtOutput(want5v == 1, m5::ext_PA);
+    g_ext5v = want5v;
+    note("power: Port A 5 V %s", want5v ? "on (for the relay)" : "off");
+  }
 
-  int brightness, wake_min;
+  int brightness, wake_min, motion_min;
   {
     config::Reader r;
     brightness = (int)((r.doc()["brightness"] | 80) * 255 / 100);
     wake_min = r.doc()["tap_wake_minutes"] | 5;
+    motion_min = r.doc()["motion_timeout"] | 10;
   }
   if (brightness < 8) brightness = 8;
   schedule::PowerInput in;
@@ -150,12 +165,13 @@ void loop() {
   in.clock_ok = clock::trusted();
   in.now = nowLocal();
   in.woken = g_wake_until && (int32_t)(millis() - g_wake_until) < 0;
-  in.motion = -1;   // Phase 7
+  in.motion = motion::state((uint32_t)std::max(1, motion_min) * 60000);
   (void)wake_min;
   const schedule::Power p = schedule::choosePower(in);
   if (p.on != g_on || p.reason != g_reason || (p.on && brightness != g_brightness)) {
     if (p.on != g_on) note("power: %s (%s)", p.on ? "on" : "off", p.reason.c_str());
     if (p.on != g_on || brightness != g_brightness) apply(p.on, brightness);
+    if (p.on != g_on) motion::powerChanged();   // the scene's lighting just changed
     g_on = p.on;
     g_reason = p.reason;
     g_brightness = brightness;
@@ -189,6 +205,7 @@ std::string statusJson() {
   d["held_off"] = g_latch;
   d["relay_pin"] = g_pin;
   d["relay_on"] = g_pin >= 0 && g_relay;
+  d["port_a_5v"] = g_ext5v == 1;
   d["woken_for_s"] = g_wake_until && (int32_t)(millis() - g_wake_until) < 0 ? (g_wake_until - millis()) / 1000 : 0;
   std::string out;
   serializeJson(d, out);

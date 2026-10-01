@@ -1,7 +1,7 @@
 #include "config.h"
 
-#include <LittleFS.h>
 #include <Preferences.h>
+#include <nvs_flash.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -13,8 +13,12 @@ namespace flapboard {
 namespace config {
 namespace {
 
-constexpr const char *kPath = "/config.json";
-constexpr const char *kTmp = "/config.json.tmp";
+// The settings JSON lives in its own NVS partition ("cfg", 256 KB): no
+// filesystem, so no VFS slot (see partitions.csv), and NVS writes of a key
+// are atomic, so a power cut never leaves half a file.
+constexpr const char *kPart = "cfg";
+constexpr const char *kNs = "settings";
+constexpr const char *kKey = "json";
 
 // Every setting, with its default. Later phases add keys here.
 constexpr const char *kDefaults = R"JSON({
@@ -67,7 +71,14 @@ constexpr const char *kDefaults = R"JSON({
   "brightness": 80,
   "tap_wake_minutes": 5,
   "relay_pin": -1,
-  "relay_active_high": true
+  "relay_active_high": true,
+  "mqtt_host": "",
+  "mqtt_port": 1883,
+  "mqtt_user": "",
+  "motion_enabled": false,
+  "motion_timeout": 10,
+  "motion_threshold": 14,
+  "motion_area": 1.5
 })JSON";
 
 JsonDocument g_doc;
@@ -86,13 +97,13 @@ bool compatible(JsonVariantConst def, JsonVariantConst v) {
 
 bool save() {
   if (!g_fs) return false;
-  File f = LittleFS.open(kTmp, "w");
-  if (!f) return false;
-  const size_t n = serializeJsonPretty(g_doc, f);
-  f.close();
-  if (!n) return false;
-  LittleFS.remove(kPath);
-  return LittleFS.rename(kTmp, kPath);   // never a half-written config
+  std::string out;
+  serializeJson(g_doc, out);
+  Preferences p;
+  if (!p.begin(kNs, false, kPart)) return false;
+  const bool ok = p.putBytes(kKey, out.data(), out.size()) == out.size();
+  p.end();
+  return ok;
 }
 
 }  // namespace
@@ -105,23 +116,37 @@ void begin() {
   g_mux = xSemaphoreCreateMutex();
   deserializeJson(g_defaults, kDefaults);
   g_doc.set(g_defaults);
-  // formatOnFail: a blank or corrupt partition becomes an empty filesystem.
-  g_fs = LittleFS.begin(true, "/littlefs", 5, "spiffs");
+  esp_err_t e0 = nvs_flash_init_partition(kPart);
+  if (e0 == ESP_ERR_NVS_NO_FREE_PAGES || e0 == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    nvs_flash_erase_partition(kPart);   // a blank or foreign partition: start it fresh
+    e0 = nvs_flash_init_partition(kPart);
+  }
+  g_fs = e0 == ESP_OK;
   if (!g_fs) {
-    note("config: LittleFS would not mount; running on defaults");
+    note("config: settings partition unavailable (%s); running on defaults", esp_err_to_name(e0));
     return;
   }
-  File f = LittleFS.open(kPath, "r");
-  if (!f) {
+  std::string text;
+  {
+    Preferences p;
+    if (p.begin(kNs, true, kPart)) {
+      const size_t n = p.getBytesLength(kKey);
+      if (n) {
+        text.assign(n, '\0');
+        p.getBytes(kKey, &text[0], n);
+      }
+      p.end();
+    }
+  }
+  if (text.empty()) {
     save();
-    note("config: created %s", kPath);
+    note("config: settings created");
     return;
   }
   JsonDocument file;
-  const DeserializationError e = deserializeJson(file, f);
-  f.close();
+  const DeserializationError e = deserializeJson(file, text);
   if (e) {
-    note("config: %s is unreadable (%s); using defaults", kPath, e.c_str());
+    note("config: stored settings are unreadable (%s); using defaults", e.c_str());
     return;
   }
   for (JsonPairConst kv : file.as<JsonObjectConst>()) {

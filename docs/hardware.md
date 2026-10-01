@@ -83,3 +83,27 @@ Per cell, on-device `bench` (serial):
   whose stack is in PSRAM, asserted `esp_task_stack_is_sane_cache_disabled()` and reset the board.
   The render and audio tasks keep PSRAM stacks and must never write flash/NVS.
 - Serial `audiocap N` records the mixer output to /sdcard/flapboard/capture.wav.
+
+## Phase 7: MQTT, camera motion, and the limits they ran into (2026-10-01)
+- **VFS table is 8 entries** in the prebuilt framework (`CONFIG_VFS_MAX_COUNT=8`): /dev/uart,
+  /dev/secondary, /dev/null, /dev/console, /sdcard, lwIP sockets, and the camera's /dev/video0 +
+  /dev/video20 fill it exactly. The settings moved from LittleFS (a whole VFS entry for one file) to a
+  256 KB NVS partition "cfg". Starting the camera before lwIP registered its sockets crashed the boot in
+  `esp_vfs_lwip_sockets_register` (ESP_ERR_NO_MEM = no free VFS slot); `esp_netif_init()` now runs first.
+  `esp_video_init_with_flags(MIPI_CSI | ISP)` keeps the camera to two devices.
+- **The camera must start before Wi-Fi.** Largest DMA-capable internal block: 207 KB before Wi-Fi,
+  47 KB after; esp_video then fails with ESP_ERR_NO_MEM. Started in setup() it takes ~19 KB.
+- **With the camera on, TLS no longer fits**: internal free ~90 KB, largest block ~34 KB. Weather falls back
+  to plain HTTP (Open-Meteo answers on both); the status says which was used.
+- **The P4 ISP's "YUV420" is not planar I420.** Reading the first width*height bytes as luma gave a texture,
+  not a picture. RGB565 is unambiguous; luma = (77R + 150G + 29B) >> 8.
+- **Invalidate the cache before reading a frame** (`esp_cache_msync(..., M2C)`): the camera DMAs into PSRAM
+  and the CPU otherwise reads stale lines. Without it every frame looked the same, so the camera-spike's
+  "0% motion, no false triggers" was in fact a broken reading. Lesson: check frames against the real scene
+  (now `/api/motion/snapshot`, on demand only).
+- ISP colour correction logs "Matrix[2][2] out of range" every frame with the default IPA tuning; colour
+  cast only, irrelevant to motion; logs are silenced after boot.
+- MQTT: esp-mqtt; tested against tools/minibroker.py (a 150-line MQTT 3.1.1 broker) rather than a real
+  Home Assistant. Discovery (15 configs), commands, refused password, and the LWT on an unclean drop verified.
+- Port A 5 V (red wire, and the M5-Bus 5 V pin) is switched by IO expander 0 pin 2 (`setExtOutput(ext_PA)`);
+  the firmware turns it on while a relay pin is configured.

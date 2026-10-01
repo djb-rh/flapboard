@@ -20,6 +20,8 @@
 #include "generated/web_assets.h"
 #include "library.h"
 #include "multipart.h"
+#include "motion.h"
+#include "mqtt.h"
 #include "net.h"
 #include "power.h"
 #include "note.h"
@@ -320,6 +322,44 @@ esp_err_t handlePower(httpd_req_t *req) {
   return sendJson(req, 200, power::statusJson());
 }
 
+// MQTT broker: {"host","port","user","password"}; a blank password keeps the
+// stored one (it is never sent back to a browser).
+esp_err_t handleMqtt(httpd_req_t *req) {
+  if (req->method == HTTP_POST) {
+    std::string body;
+    if (!readBody(req, &body, 1024)) return sendError(req, 400, "request too large");
+    JsonDocument d;
+    if (deserializeJson(d, body)) return sendError(req, 400, "invalid JSON");
+    mqtt::setServer(d["host"] | "", d["port"] | 1883, d["user"] | "", d["password"] | "");
+  }
+  return sendJson(req, 200, mqtt::statusJson());
+}
+
+esp_err_t handleMotion(httpd_req_t *req) { return sendJson(req, 200, motion::statusJson()); }
+
+// The aiming view: 80x45 brightness bytes then 80x45 changed flags (binary).
+// Only produced while someone has the page open; nothing is stored.
+esp_err_t handleMotionView(httpd_req_t *req) {
+  static uint8_t buf[motion::kGridW * motion::kGridH * 2];
+  if (!motion::view(buf, buf + motion::kGridW * motion::kGridH)) return sendError(req, 409, "motion sensing is off");
+  httpd_resp_set_type(req, "application/octet-stream");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  return httpd_resp_send(req, (const char *)buf, sizeof(buf));
+}
+
+// A grey PGM of what the camera sees, for checking it against the room.
+esp_err_t handleMotionSnapshot(httpd_req_t *req) {
+  static uint8_t *buf = (uint8_t *)heap_caps_malloc(motion::kSnapW * motion::kSnapH * 3, MALLOC_CAP_SPIRAM);
+  if (!buf || !motion::snapshot(buf, 2000)) return sendError(req, 409, "the camera is not running");
+  char hdr[32];
+  const int n = snprintf(hdr, sizeof(hdr), "P6\n%d %d\n255\n", motion::kSnapW, motion::kSnapH);
+  httpd_resp_set_type(req, "image/x-portable-pixmap");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+  httpd_resp_send_chunk(req, hdr, n);
+  httpd_resp_send_chunk(req, (const char *)buf, motion::kSnapW * motion::kSnapH * 3);
+  return httpd_resp_send_chunk(req, nullptr, 0);
+}
+
 esp_err_t handleSchedulePage(httpd_req_t *req) { return sendAsset(req, "/schedule.html"); }
 
 esp_err_t handleMessagesPage(httpd_req_t *req) { return sendAsset(req, "/messages.html"); }
@@ -587,7 +627,7 @@ void begin() {
   g_buf = (char *)heap_caps_malloc(kChunk, MALLOC_CAP_SPIRAM);
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.stack_size = 10240;
-  cfg.max_uri_handlers = 56;
+  cfg.max_uri_handlers = 64;
   cfg.uri_match_fn = httpd_uri_match_wildcard;   // for /fonts/*
   cfg.lru_purge_enable = true;
   cfg.recv_wait_timeout = 20;
@@ -621,6 +661,11 @@ void begin() {
       {"/messages", HTTP_GET, handleMessagesPage},
       {"/schedule", HTTP_GET, handleSchedulePage},
       {"/api/power", HTTP_GET, handlePower},
+      {"/api/mqtt", HTTP_GET, handleMqtt},
+      {"/api/mqtt", HTTP_POST, handleMqtt},
+      {"/api/motion", HTTP_GET, handleMotion},
+      {"/api/motion/view", HTTP_GET, handleMotionView},
+      {"/api/motion/snapshot", HTTP_GET, handleMotionSnapshot},
       {"/api/power", HTTP_POST, handlePower},
       {"/clock", HTTP_GET, handleClockPage},
       {"/api/volume", HTTP_POST, handleVolume},

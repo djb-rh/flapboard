@@ -9,6 +9,8 @@
 
 #include "config.h"
 #include "content.h"
+#include "motion.h"
+#include "mqtt.h"
 #include "power.h"
 #include "weather.h"
 #include "net.h"
@@ -111,6 +113,11 @@ std::string json() {
   JsonDocument pw;
   deserializeJson(pw, power::statusJson());
   d["power"] = pw;
+  JsonDocument mq, mo;
+  deserializeJson(mq, mqtt::statusJson());
+  deserializeJson(mo, motion::statusJson());
+  d["mqtt"] = mq;
+  d["motion"] = mo;
   d["weather"] = wx;
   std::string out;
   serializeJson(d, out);

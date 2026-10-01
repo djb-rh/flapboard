@@ -34,6 +34,7 @@ Reading g_now;
 std::string g_error = "not fetched yet";
 volatile bool g_refresh = false;
 uint32_t g_internal_low = 0;   // least internal RAM seen during a fetch
+bool g_plain = false;          // the last good fetch fell back to plain HTTP
 
 // WMO weather codes as words short enough for a board.
 const char *describe(int code, bool day) {
@@ -76,17 +77,17 @@ esp_err_t onEvent(esp_http_client_event_t *e) {
   return ESP_OK;
 }
 
-bool fetch(float lat, float lon, bool metric, const std::string &place, std::string *err) {
+bool fetch(float lat, float lon, bool metric, const std::string &place, bool tls, std::string *err) {
   char url[400];
   snprintf(url, sizeof(url),
-           "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
+           "%s://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
            "&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,is_day"
            "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1%s",
-           lat, lon, metric ? "" : "&temperature_unit=fahrenheit&wind_speed_unit=mph");
+           tls ? "https" : "http", lat, lon, metric ? "" : "&temperature_unit=fahrenheit&wind_speed_unit=mph");
   Body body;
   esp_http_client_config_t c = {};
   c.url = url;
-  c.crt_bundle_attach = esp_crt_bundle_attach;
+  if (tls) c.crt_bundle_attach = esp_crt_bundle_attach;
   c.timeout_ms = 10000;
   c.event_handler = onEvent;
   c.user_data = &body;
@@ -159,11 +160,23 @@ void task(void *) {
     last_metric = metric;
     std::string err;
     g_internal_low = 0;
-    const bool ok = fetch(lat, lon, metric, place, &err);
+    // HTTPS first. A TLS handshake needs ~40 KB of internal RAM, which is not
+    // there with the camera and Wi-Fi both running; the weather is public and
+    // harmless, so it then comes over plain HTTP rather than not at all.
+    bool ok = fetch(lat, lon, metric, place, true, &err);
+    bool plain = false;
+    if (!ok && err.find("HTTP_CONNECT") != std::string::npos) {
+      std::string err2;
+      ok = fetch(lat, lon, metric, place, false, &err2);
+      plain = ok;
+      if (!ok) err = err2;
+    }
+    g_plain = plain;
     if (ok) {
       g_error.clear();
-      note("weather: %s %.0f%s, %s (internal RAM low point %u KB)", place.c_str(), g_now.temp, metric ? "C" : "F",
-           describe(g_now.code, g_now.day), (unsigned)(g_internal_low / 1024));
+      note("weather: %s %.0f%s, %s (%s, internal RAM low point %u KB)", place.c_str(), g_now.temp, metric ? "C" : "F",
+           describe(g_now.code, g_now.day), plain ? "plain HTTP: not enough RAM for TLS" : "HTTPS",
+           (unsigned)(g_internal_low / 1024));
       next = millis() + (uint32_t)std::max(5, minutes) * 60000;
     } else {
       g_error = err;
@@ -225,6 +238,7 @@ std::string statusJson() {
     d["place"] = r.place;
   }
   d["error"] = err;
+  d["https"] = !g_plain;
   std::string out;
   serializeJson(d, out);
   return out;

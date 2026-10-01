@@ -19,6 +19,7 @@
 #include <dirent.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_vfs.h>
 #include <esp_task_wdt.h>
 #include <esp_rom_crc.h>
 #include <lgfx/v1/platforms/esp32p4/Panel_DSI.hpp>
@@ -229,6 +230,11 @@ int run(const std::string &line) {
   }
   if (c == "mem") return cmdMem();
   // Touch stand-ins for testing without a finger: what a long press / tap does.
+  if (c == "vfs") {   // which file systems hold the VFS table's 8 slots
+    esp_vfs_dump_registered_paths(stdout);
+    fflush(stdout);
+    return 0;
+  }
   if (c == "wake") {   // what a tap on the dark screen does
     power::wake();
     return 0;

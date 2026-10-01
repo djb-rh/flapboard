@@ -1,4 +1,4 @@
-// Settings: /littlefs/config.json, merged over built-in defaults on load (as
+// Settings: one JSON document in the "cfg" NVS partition, merged over built-in defaults on load (as
 // the Pi frame does), so a firmware that adds a key upgrades old files
 // unchanged. Secrets (Wi-Fi and broker passwords) live in NVS instead and
 // are never sent back to a browser.
@@ -14,7 +14,7 @@
 namespace flapboard {
 namespace config {
 
-void begin();   // mounts LittleFS, loads (or creates) config.json
+void begin();   // loads (or creates) the settings
 
 // Read access: call with the lock held via Reader, e.g.
 //   { config::Reader r; name = r.doc()["device_name"].as<std::string>(); }

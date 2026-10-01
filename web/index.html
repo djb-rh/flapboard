@@ -15,6 +15,15 @@
 <label for="dn">Name (also its network name: <span id="host" class="dim"></span>)</label>
 <input id="dn" maxlength="40" autocomplete="off">
 <div class="row"><button id="save">Save</button></div></section>
+<section class="card"><h2>Home Assistant (MQTT)</h2>
+<p class="dim" id="mqst" style="margin:0 0 6px">...</p>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 14px">
+<div><label for="mqh">Broker address</label><input id="mqh" placeholder="homeassistant.local or 10.0.1.5"></div>
+<div><label for="mqp">Port</label><input id="mqp" type="number" value="1883"></div>
+<div><label for="mqu">User name</label><input id="mqu" autocomplete="off"></div>
+<div><label for="mqw">Password</label><input id="mqw" type="password" autocomplete="new-password"></div></div>
+<div class="row"><button id="mqsave" class="sec">Save and connect</button></div>
+<p class="dim" style="font-size:13px">With Home Assistant's MQTT integration, the sign appears by itself: display and lights on/off, a message box, what to show, volume, brightness, sound, next message, motion and diagnostics. Leave the address empty to turn MQTT off. The password is never shown again; leave it blank to keep the saved one.</p></section>
 <section class="card"><h2>Wi-Fi chip</h2><dl id="c6"></dl>
 <div class="row"><button id="c6up" class="sec" disabled>Update Wi-Fi chip firmware</button></div></section>
 <section class="card"><h2>System</h2>
@@ -63,6 +72,12 @@ $('#save').onclick=async()=>{
 };
 $('#c6up').onclick=async()=>{if(!confirm('Download and flash the matching Wi-Fi chip firmware? The sign restarts when it is done (a minute or two).'))return;
   const r=await fetch('/api/c6update',{method:'POST'});const d=await r.json();note(r.ok?'ok':'err',r.ok?'Updating the Wi-Fi chip... this page will come back after the restart.':d.error)};
+let mqLoaded=false;
+async function mqRefresh(){try{const m=await (await fetch('/api/mqtt')).json();$('#mqst').textContent=(m.connected?'Connected':m.state)+'. Topics: '+m.topic_base+'/...'+(m.password_stored?' (password saved)':'');
+  if(!mqLoaded){const c=await (await fetch('/api/config')).json();$('#mqh').value=c.mqtt_host;$('#mqp').value=c.mqtt_port;$('#mqu').value=c.mqtt_user;mqLoaded=true}}catch(e){}}
+$('#mqsave').onclick=async()=>{const r=await fetch('/api/mqtt',{method:'POST',body:JSON.stringify({host:$('#mqh').value.trim(),port:+$('#mqp').value||1883,user:$('#mqu').value.trim(),password:$('#mqw').value})});
+  $('#mqw').value='';note(r.ok?'ok':'err',r.ok?'Saved. Connecting...':'Could not save');setTimeout(mqRefresh,4000)};
+mqRefresh();setInterval(mqRefresh,8000);
 $('#reboot').onclick=async()=>{if(!confirm('Restart the sign?'))return;await fetch('/api/reboot',{method:'POST'});note('ok','Restarting...')};
 refresh();setInterval(refresh,5000);
 </script></body></html>

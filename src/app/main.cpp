@@ -3,7 +3,9 @@
 // serial console. See PLAN.md.
 #include <Arduino.h>
 #include <M5Unified.h>
+#include <esp_heap_caps.h>
 #include <esp_log.h>
+#include <esp_netif.h>
 #include <esp_task_wdt.h>
 #include <sys/stat.h>
 
@@ -12,6 +14,8 @@
 #include "content.h"
 #include "console.h"
 #include "library.h"
+#include "motion.h"
+#include "mqtt.h"
 #include "net.h"
 #include "power.h"
 #include "note.h"
@@ -39,6 +43,11 @@ void makeLibraryFolders() {
 
 }  // namespace
 
+static void mem(const char *stage) {
+  note("mem %-14s internal %3u KB, largest DMA %3u KB", stage, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+       (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) / 1024));
+}
+
 void setup() {
   // Settings first, so the relay pin is driven OFF before anything else runs:
   // a reboot must never flash the car's lights.
@@ -53,13 +62,26 @@ void setup() {
   if (sdcard::begin()) makeLibraryFolders();
   else note("sd: no card (or not FAT32): the file library is unavailable");
 
+  mem("before sound");
   clock::begin();
   sound::begin();
+  mem("after sound");
   sign::begin();
   content::begin();
+  mem("after sign");
+  // The network stack first (lwIP's socket VFS: one of a handful of VFS slots,
+  // and the camera's devices would otherwise take the last ones), then the
+  // camera, then Wi-Fi itself (which takes the internal RAM the camera needs).
+  esp_netif_init();
+  motion::beginEarly();
+  mem("after camera");
   net::begin();
+  mem("after net");
   web::begin();
+  mem("after web");
   weather::begin();
+  mqtt::begin();
+  mem("after mqtt");
   // ESP-IDF's own logging goes quiet from here: with the Mac attached and
   // nothing reading serial, blocking log writes were suspected of killing
   // Wi-Fi uploads on the T48 build. note() still prints.
@@ -102,6 +124,8 @@ void loop() {
   clock::loop();
   content::loop();
   power::loop();
+  motion::loop();
+  mqtt::loop();
   status::update();
   console::loop();
   if (web::takeRebootRequest()) {

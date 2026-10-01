@@ -252,6 +252,9 @@ void showOverride(const std::string &text, int seconds) {
   sign::show(expand(text), 1, true);
 }
 
+void next() { g_next_ms = millis(); }
+std::string overrideText() { return g_override_on ? g_override : ""; }
+
 void clearOverride() {
   g_override_on = false;
   g_shown.clear();

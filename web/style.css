@@ -14,7 +14,7 @@ main{max-width:860px;margin:0 auto;padding:18px 16px 48px}
 dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0}
 dt{color:var(--dim)}dd{margin:0;word-break:break-word}
 label{display:block;color:var(--dim);font-size:13px;margin:10px 0 4px}
-input[type=text],input[type=password],input:not([type]),select{width:100%;padding:9px 11px;font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:8px}
+input[type=text],input[type=password],input[type=number],input:not([type]),select{width:100%;padding:9px 11px;font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:8px}
 input:focus,select:focus{outline:none;border-color:var(--accent)}
 button{font:inherit;font-weight:600;padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
 button.sec{background:var(--panel2);border-color:var(--border);color:var(--text)}

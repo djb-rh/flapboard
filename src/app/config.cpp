@@ -21,7 +21,28 @@ constexpr const char *kDefaults = R"JSON({
   "device_name": "FlapBoard",
   "sound_enabled": true,
   "sound_volume": 60,
-  "sound_offset_ms": 0
+  "sound_offset_ms": 0,
+  "board_rows": 6,
+  "board_cols": 22,
+  "flap_width": 0,
+  "flap_aspect": 1.4,
+  "flap_gap": 4,
+  "board_margin": 12,
+  "glyph_size": 62,
+  "theme": "solari",
+  "color_background": "",
+  "color_flap": "",
+  "color_glyph": "",
+  "font": "BebasNeue-Regular",
+  "side_left": "",
+  "side_right": "",
+  "side_width": 15,
+  "side_fit": "contain",
+  "side_background": "#000000",
+  "orientation": "landscape",
+  "flip_ms": 70,
+  "speed_variance": 3,
+  "start_mode": "random"
 })JSON";
 
 JsonDocument g_doc;

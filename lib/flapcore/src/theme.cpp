@@ -23,4 +23,43 @@ Theme Theme::named(const std::string &name) {
   return t;
 }
 
+bool Theme::parseHex(const std::string &hex, uint16_t *out) {
+  std::string h = hex;
+  if (!h.empty() && h[0] == '#') h.erase(0, 1);
+  if (h.size() != 6) return false;
+  unsigned v = 0;
+  for (char c : h) {
+    v <<= 4;
+    if (c >= '0' && c <= '9') v |= c - '0';
+    else if (c >= 'a' && c <= 'f') v |= c - 'a' + 10;
+    else if (c >= 'A' && c <= 'F') v |= c - 'A' + 10;
+    else return false;
+  }
+  *out = rgb565((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+  return true;
+}
+
+namespace {
+uint16_t scale(uint16_t p, int k) {   // k/256 brightness
+  const int r = ((p >> 11) & 31) * k >> 8, g = ((p >> 5) & 63) * k >> 8, b = (p & 31) * k >> 8;
+  return (uint16_t)(((r > 31 ? 31 : r) << 11) | ((g > 63 ? 63 : g) << 5) | (b > 31 ? 31 : b));
+}
+}  // namespace
+
+Theme Theme::custom(const std::string &preset, const std::string &background, const std::string &flap,
+                    const std::string &glyph) {
+  Theme t = named(preset);
+  uint16_t c;
+  if (parseHex(background, &c)) {
+    t.background = c;
+    t.hinge = scale(c, 120);
+  }
+  if (parseHex(flap, &c)) {
+    t.flap_top = c;
+    t.flap_bottom = scale(c, 225);   // lit from above
+  }
+  if (parseHex(glyph, &c)) t.glyph = c;
+  return t;
+}
+
 }  // namespace flapcore

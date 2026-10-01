@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "config.h"
+#include "generated/fonts.h"
 #include "generated/web_assets.h"
 #include "library.h"
 #include "multipart.h"
@@ -154,6 +155,56 @@ esp_err_t handleRoot(httpd_req_t *req) {
 }
 esp_err_t handleLibraryPage(httpd_req_t *req) { return sendAsset(req, "/library.html"); }
 esp_err_t handleSetup(httpd_req_t *req) { return sendAsset(req, "/setup.html"); }
+esp_err_t handleDisplayPage(httpd_req_t *req) { return sendAsset(req, "/display.html"); }
+
+// Fonts: the built-in faces and any .ttf in /flapboard/fonts.
+esp_err_t handleFontList(httpd_req_t *req) {
+  std::string j = "{\"fonts\":[";
+  bool first = true;
+  for (const auto &f : fonts::kFonts) {
+    j += std::string(first ? "" : ",") + "{\"name\":" + library::jsonStr(f.name) + ",\"source\":\"built-in\"}";
+    first = false;
+  }
+  std::vector<library::Entry> e;
+  if (library::list("fonts", &e) == library::Err::Ok) {
+    for (auto &x : e) {
+      if (x.dir || x.name.size() < 5 || strcasecmp(x.name.c_str() + x.name.size() - 4, ".ttf") != 0) continue;
+      j += std::string(first ? "" : ",") + "{\"name\":" + library::jsonStr(x.name.substr(0, x.name.size() - 4)) +
+           ",\"source\":\"card\"}";
+      first = false;
+    }
+  }
+  return sendJson(req, 200, j + "]}");
+}
+
+// /fonts/<name>.ttf, so the web preview draws with the sign's own faces.
+esp_err_t handleFontFile(httpd_req_t *req) {
+  std::string name = urlDecode(req->uri + strlen("/fonts/"));
+  const size_t q = name.find('?');
+  if (q != std::string::npos) name.resize(q);
+  if (name.size() > 4 && name.compare(name.size() - 4, 4, ".ttf") == 0) name.resize(name.size() - 4);
+  for (const auto &f : fonts::kFonts) {
+    if (name != f.name) continue;
+    httpd_resp_set_type(req, "font/ttf");
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
+    return httpd_resp_send(req, (const char *)f.data, f.len);
+  }
+  std::string abs;
+  if (name.find('/') != std::string::npos || library::resolve("fonts/" + name + ".ttf", &abs) != library::Err::Ok)
+    return sendError(req, 404, "no such font");
+  FILE *f = fopen(abs.c_str(), "rb");
+  if (!f) return sendError(req, 404, "no such font");
+  httpd_resp_set_type(req, "font/ttf");
+  size_t n;
+  while ((n = fread(g_buf, 1, kChunk, f)) > 0) {
+    if (httpd_resp_send_chunk(req, g_buf, n) != ESP_OK) {
+      fclose(f);
+      return ESP_FAIL;
+    }
+  }
+  fclose(f);
+  return httpd_resp_send_chunk(req, nullptr, 0);
+}
 
 // Everything else: an embedded file, or (in setup mode) the redirect that
 // makes a phone open the setup page -- phones probe /hotspot-detect.html,
@@ -456,7 +507,8 @@ void begin() {
   g_buf = (char *)heap_caps_malloc(kChunk, MALLOC_CAP_SPIRAM);
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.stack_size = 10240;
-  cfg.max_uri_handlers = 32;
+  cfg.max_uri_handlers = 40;
+  cfg.uri_match_fn = httpd_uri_match_wildcard;   // for /fonts/*
   cfg.lru_purge_enable = true;
   cfg.recv_wait_timeout = 20;
   cfg.send_wait_timeout = 20;
@@ -473,6 +525,9 @@ void begin() {
       {"/", HTTP_GET, handleRoot},
       {"/library", HTTP_GET, handleLibraryPage},
       {"/setup", HTTP_GET, handleSetup},
+      {"/display", HTTP_GET, handleDisplayPage},
+      {"/api/fonts", HTTP_GET, handleFontList},
+      {"/fonts/*", HTTP_GET, handleFontFile},
       {"/api/status", HTTP_GET, handleStatus},
       {"/api/config", HTTP_GET, handleConfigGet},
       {"/api/config", HTTP_POST, handleConfigPost},

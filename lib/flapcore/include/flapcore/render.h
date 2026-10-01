@@ -24,10 +24,12 @@ class Surface {
   virtual ~Surface() = default;
   virtual void blit(int x, int y, int w, int h, const uint16_t *rgb565) = 0;
   virtual void fill(int x, int y, int w, int h, uint16_t rgb565) = 0;
-  // Optional fast path: a pointer to logical column x from row y onwards, if
-  // those pixels are contiguous in the surface's memory (null otherwise).
-  // With column-major glyphs the renderer then draws straight into it.
-  virtual uint16_t *column(int x, int y) { return nullptr; }
+  // Optional fast path: a pointer to logical pixel (x, y) when the pixels
+  // below it in that column are evenly spaced in memory (null otherwise).
+  // *step is +1 (memory runs down the column) or -1 (runs up it, as on a
+  // portrait panel turned the other way). With column-major glyphs the
+  // renderer then draws straight into it.
+  virtual uint16_t *column(int x, int y, int *step) { return nullptr; }
   // Called after a cell was drawn through column(): flush caches etc.
   virtual void columnsDone(int x, int y, int w, int h) {}
 };

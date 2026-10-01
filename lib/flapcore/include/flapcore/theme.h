@@ -19,6 +19,12 @@ struct Theme {
   float corner_frac = 0.08f;                         // corner radius / cell width
 
   static Theme named(const std::string &name);       // "solari" (default), "vesta", "amber", "white"
+  // A preset with any of its colours replaced ("#RRGGBB"; empty keeps the
+  // preset's). The lower flap half and the split line are derived from the
+  // flap and background colours.
+  static Theme custom(const std::string &preset, const std::string &background, const std::string &flap,
+                      const std::string &glyph);
+  static bool parseHex(const std::string &hex, uint16_t *out);
 };
 
 }  // namespace flapcore

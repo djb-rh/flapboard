@@ -9,6 +9,7 @@
 #include "flapcore/layout.h"
 #include "flapcore/message.h"
 #include "flapcore/render.h"
+#include "flapcore/theme.h"
 
 using namespace flapcore;
 
@@ -228,9 +229,23 @@ struct ColumnSurface : RowSurface {
   std::vector<uint16_t> cols;
   int done = 0;
   ColumnSurface(int w, int h) : RowSurface(w, h), cols((size_t)w * h, 0) {}
-  uint16_t *column(int x, int y) override { return &cols[(size_t)x * H + y]; }
+  uint16_t *column(int x, int y, int *step) override {
+    *step = 1;
+    return &cols[(size_t)x * H + y];
+  }
   void columnsDone(int, int, int, int) override { done++; }
   uint16_t at(int x, int y) const { return cols[(size_t)x * H + y]; }
+};
+
+// Columns whose memory runs upwards (the Tab5 turned the other way up).
+struct ReversedColumnSurface : RowSurface {
+  std::vector<uint16_t> cols;
+  ReversedColumnSurface(int w, int h) : RowSurface(w, h), cols((size_t)w * h, 0) {}
+  uint16_t *column(int x, int y, int *step) override {
+    *step = -1;
+    return &cols[(size_t)x * H + (H - 1 - y)];
+  }
+  uint16_t at(int x, int y) const { return cols[(size_t)x * H + (H - 1 - y)]; }
 };
 
 void test_column_path_matches_row_path() {
@@ -250,6 +265,7 @@ void test_column_path_matches_row_path() {
   rc.setup(lay, &cols_g, theme);
   RowSurface a(400, 200);
   ColumnSurface b(400, 200);
+  ReversedColumnSurface c(400, 200);
   const float progress[] = {0.0f, 0.1f, 0.3f, 0.49f, 0.5f, 0.51f, 0.75f, 0.95f};
   for (float p : progress) {
     CellView v;
@@ -259,10 +275,11 @@ void test_column_path_matches_row_path() {
     v.progress = p;
     rr.drawCell(a, 1, 3, v);
     rc.drawCell(b, 1, 3, v);
+    rc.drawCell(c, 1, 3, v);
     const Rect r = lay.cell(1, 3);
     for (int y = r.y; y < r.y + r.h; y++)
       for (int x = r.x; x < r.x + r.w; x++) {
-        if (a.px[(size_t)y * 400 + x] != b.at(x, y)) {
+        if (a.px[(size_t)y * 400 + x] != b.at(x, y) || a.px[(size_t)y * 400 + x] != c.at(x, y)) {
           char m[80];
           snprintf(m, sizeof(m), "progress %.2f differs at cell pixel %d,%d", p, x - r.x, y - r.y);
           TEST_FAIL_MESSAGE(m);
@@ -341,6 +358,19 @@ void test_mixer_steals_and_never_clips() {
   for (int16_t v : out) TEST_ASSERT_TRUE(v <= 28100 && v >= -28100);
 }
 
+void test_theme_custom_colours() {
+  uint16_t c = 0;
+  TEST_ASSERT_TRUE(Theme::parseHex("#FF8000", &c));
+  TEST_ASSERT_EQUAL_HEX16(rgb565(0xFF, 0x80, 0x00), c);
+  TEST_ASSERT_FALSE(Theme::parseHex("#12345", &c));
+  TEST_ASSERT_FALSE(Theme::parseHex("zz0000", &c));
+  const Theme t = Theme::custom("solari", "", "#204060", "#FFFFFF");
+  TEST_ASSERT_EQUAL_HEX16(Theme::named("solari").background, t.background);   // empty keeps the preset's
+  TEST_ASSERT_EQUAL_HEX16(rgb565(0x20, 0x40, 0x60), t.flap_top);
+  TEST_ASSERT_TRUE(t.flap_bottom != t.flap_top);
+  TEST_ASSERT_EQUAL_HEX16(rgb565(0xFF, 0xFF, 0xFF), t.glyph);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_drum_order);
@@ -356,5 +386,6 @@ int main() {
   RUN_TEST(test_board_lookahead_reports_once);
   RUN_TEST(test_mixer_places_clacks_on_their_sample);
   RUN_TEST(test_mixer_steals_and_never_clips);
+  RUN_TEST(test_theme_custom_colours);
   return UNITY_END();
 }

@@ -1,6 +1,7 @@
 #include "sign.h"
 
 #include <Arduino.h>
+#include <SD_MMC.h>   // before M5Unified, so M5GFX can draw images from it
 #include <M5Unified.h>
 #include <esp_cache.h>
 #include <esp_heap_caps.h>
@@ -10,6 +11,9 @@
 #include <freertos/semphr.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <vector>
 
 #include <flapcore/board.h>
 #include <flapcore/drum.h>
@@ -24,6 +28,7 @@
 #include "config.h"
 #include "net.h"
 #include "note.h"
+#include "sdcard.h"
 #include "sound.h"
 
 namespace flapboard {
@@ -36,14 +41,15 @@ void *psramAlloc(size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALL
 const flapcore::Allocator kPsram{psramAlloc, heap_caps_free};
 
 // Straight into the DSI framebuffer. The panel is portrait (720x1280) and the
-// sign landscape (rotation 3): logical (x, y) is panel row ph-1-x, column y,
-// so each logical column of a cell is one contiguous run in panel memory and
-// a blit is a transpose. M5GFX's pushImage rotated pixel by pixel and cost
-// ~0.55 ms per cell; this path is measured in the stats line.
+// sign landscape. In rotation 3 logical (x, y) is panel row ph-1-x, column y;
+// in rotation 1 (the other way up) it is row x, column pw-1-y. Either way each
+// logical column of a cell is one evenly spaced run in panel memory (upwards
+// in rotation 1), which flapcore composes into directly. M5GFX's pushImage
+// rotated pixel by pixel and cost ~0.55 ms per cell.
 struct PanelSurface : Surface {
   uint8_t *fb = nullptr;
   size_t stride = 0;   // bytes per panel row
-  int pw = 0, ph = 0;
+  int pw = 0, ph = 0, rot = 3;
   uint64_t blit_us = 0, sync_us = 0;
 
   bool begin() {
@@ -52,40 +58,188 @@ struct PanelSurface : Surface {
     pw = panel->config().panel_width;
     ph = panel->config().panel_height;
     stride = ((size_t)pw * 2 + 3) & ~(size_t)3;
-    return fb && M5.Display.getRotation() == 3;
+    rot = M5.Display.getRotation();
+    if (rot != 1 && rot != 3) fb = nullptr;
+    return fb != nullptr;
   }
-  void blit(int x, int y, int w, int h, const uint16_t *px) override {
+  uint16_t *at(int x, int y) const {
+    return rot == 3 ? (uint16_t *)(fb + (size_t)(ph - 1 - x) * stride) + y
+                    : (uint16_t *)(fb + (size_t)x * stride) + (pw - 1 - y);
+  }
+  void sync(int x, int w) {
     const int64_t t = esp_timer_get_time();
-    for (int c = 0; c < w; c++) {
-      uint16_t *dst = (uint16_t *)(fb + (size_t)(ph - 1 - (x + c)) * stride) + y;
-      const uint16_t *src = px + c;
-      for (int r = 0; r < h; r++) dst[r] = src[(size_t)r * w];
-    }
-    const int64_t t2 = esp_timer_get_time();
-    // The display DMA reads PSRAM, not the CPU cache: write the rows back.
-    uint8_t *lo = fb + (size_t)(ph - (x + w)) * stride;
-    const size_t len = (size_t)w * stride;
-    esp_cache_msync(lo, len, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-    const int64_t t3 = esp_timer_get_time();
-    blit_us += (uint64_t)(t3 - t);
-    sync_us += (uint64_t)(t3 - t2);
-  }
-  void fill(int x, int y, int w, int h, uint16_t c) override { M5.Display.fillRect(x, y, w, h, c); }
-  // The fast path: flapcore composes each cell column straight into panel
-  // memory (glyphs are stored column-major to match), no scratch, no transpose.
-  uint16_t *column(int x, int y) override {
-    return fb ? (uint16_t *)(fb + (size_t)(ph - 1 - x) * stride) + y : nullptr;
-  }
-  void columnsDone(int x, int y, int w, int h) override {
-    const int64_t t = esp_timer_get_time();
-    esp_cache_msync(fb + (size_t)(ph - (x + w)) * stride, (size_t)w * stride,
+    const int row0 = rot == 3 ? ph - (x + w) : x;
+    esp_cache_msync(fb + (size_t)row0 * stride, (size_t)w * stride,
                     ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
     sync_us += (uint64_t)(esp_timer_get_time() - t);
   }
+  void blit(int x, int y, int w, int h, const uint16_t *px) override {
+    const int64_t t = esp_timer_get_time();
+    const int step = rot == 3 ? 1 : -1;
+    for (int c = 0; c < w; c++) {
+      uint16_t *dst = at(x + c, y);
+      for (int r = 0; r < h; r++) dst[r * step] = px[(size_t)r * w + c];
+    }
+    sync(x, w);
+    blit_us += (uint64_t)(esp_timer_get_time() - t);
+  }
+  void fill(int x, int y, int w, int h, uint16_t c) override { M5.Display.fillRect(x, y, w, h, c); }
+  uint16_t *column(int x, int y, int *step) override {
+    if (!fb) return nullptr;
+    *step = rot == 3 ? 1 : -1;
+    return at(x, y);
+  }
+  void columnsDone(int x, int y, int w, int h) override { sync(x, w); }
 };
 
 SemaphoreHandle_t g_mux;
 volatile bool g_bench = false;
+
+// ---- settings -----------------------------------------------------------------
+
+struct Settings {
+  int rows = 6, cols = 22, flap_w = 0, gap = 4, margin = 12, side_pct = 15;
+  float aspect = 1.4f, cap = 0.62f;
+  std::string theme = "solari", c_bg, c_flap, c_glyph, font = "BebasNeue-Regular";
+  std::string left, right, side_fit = "contain", side_bg = "#000000";
+  bool flipped = false;
+  Motion motion;
+
+  // Everything that needs the glyphs rebuilt and the screen redrawn.
+  std::string layoutKey() const {
+    char b[160];
+    snprintf(b, sizeof(b), "%d|%d|%d|%d|%d|%d|%.3f|%.3f|%d|", rows, cols, flap_w, gap, margin, side_pct, aspect, cap,
+             flipped);
+    return b + theme + "|" + c_bg + "|" + c_flap + "|" + c_glyph + "|" + font + "|" + left + "|" + right + "|" +
+           side_fit + "|" + side_bg;
+  }
+};
+
+template <typename T>
+T clampv(T v, T lo, T hi) { return v < lo ? lo : v > hi ? hi : v; }
+
+Settings readSettings() {
+  Settings s;
+  config::Reader r;
+  auto &d = r.doc();
+  s.rows = clampv<int>(d["board_rows"] | 6, 1, 12);
+  s.cols = clampv<int>(d["board_cols"] | 22, 1, 40);
+  s.flap_w = clampv<int>(d["flap_width"] | 0, 0, 400);
+  s.aspect = clampv<float>(d["flap_aspect"] | 1.4f, 0.8f, 2.5f);
+  s.gap = clampv<int>(d["flap_gap"] | 4, 0, 40);
+  s.margin = clampv<int>(d["board_margin"] | 12, 0, 200);
+  s.cap = clampv<float>((d["glyph_size"] | 62) / 100.0f, 0.3f, 0.9f);
+  s.theme = d["theme"] | "solari";
+  s.c_bg = d["color_background"] | "";
+  s.c_flap = d["color_flap"] | "";
+  s.c_glyph = d["color_glyph"] | "";
+  s.font = d["font"] | "BebasNeue-Regular";
+  s.left = d["side_left"] | "";
+  s.right = d["side_right"] | "";
+  s.side_pct = clampv<int>(d["side_width"] | 15, 5, 40);
+  s.side_fit = d["side_fit"] | "contain";
+  s.side_bg = d["side_background"] | "#000000";
+  s.flipped = std::string(d["orientation"] | "landscape") == "landscape_flipped";
+  s.motion.flip_ms = clampv<float>(d["flip_ms"] | 70, 20, 400);
+  s.motion.speed_variance = clampv<float>((d["speed_variance"] | 3) / 100.0f, 0, 0.2f);
+  const std::string start = d["start_mode"] | "random";
+  s.motion.start = start == "together" ? StartMode::Together : start == "wave" ? StartMode::Wave : StartMode::Random;
+  return s;
+}
+
+// ---- fonts and side images ------------------------------------------------------
+
+// A built-in face, or a .ttf from /flapboard/fonts on the card (kept in PSRAM
+// for as long as it is in use).
+std::vector<uint8_t> g_font_file;
+std::string g_font_used;
+
+bool loadFont(TrueTypeFont &font, const std::string &name) {
+  for (const auto &f : fonts::kFonts) {
+    if (name == f.name && font.load(f.data, f.len)) {
+      g_font_used = f.name;
+      return true;
+    }
+  }
+  if (sdcard::mounted() && name.find('/') == std::string::npos && name.find("..") == std::string::npos) {
+    const std::string path = std::string(sdcard::mountPoint()) + "/flapboard/fonts/" + name + ".ttf";
+    if (FILE *f = fopen(path.c_str(), "rb")) {
+      fseek(f, 0, SEEK_END);
+      const long n = ftell(f);
+      fseek(f, 0, SEEK_SET);
+      if (n > 0 && n < 8 * 1024 * 1024) {
+        g_font_file.assign((size_t)n, 0);
+        if (fread(g_font_file.data(), 1, (size_t)n, f) == (size_t)n && font.load(g_font_file.data(), g_font_file.size())) {
+          fclose(f);
+          g_font_used = name;
+          return true;
+        }
+      }
+      fclose(f);
+    }
+    note("sign: font %s not found or unreadable; using the built-in one", name.c_str());
+  }
+  font.load(fonts::kFonts[0].data, fonts::kFonts[0].len);
+  for (const auto &f : fonts::kFonts)
+    if (strcmp(f.name, "BebasNeue-Regular") == 0) font.load(f.data, f.len);
+  g_font_used = "BebasNeue-Regular";
+  return false;
+}
+
+// Width/height from a PNG or JPEG header, for "cover" scaling.
+bool imageSize(const std::string &path, int *w, int *h) {
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) return false;
+  uint8_t b[32];
+  bool ok = false;
+  if (fread(b, 1, 24, f) == 24) {
+    if (!memcmp(b, "\x89PNG", 4)) {
+      *w = b[16] << 24 | b[17] << 16 | b[18] << 8 | b[19];
+      *h = b[20] << 24 | b[21] << 16 | b[22] << 8 | b[23];
+      ok = true;
+    } else if (b[0] == 0xFF && b[1] == 0xD8) {
+      fseek(f, 2, SEEK_SET);
+      for (int guard = 0; guard < 200 && fread(b, 1, 4, f) == 4 && b[0] == 0xFF; guard++) {
+        const int len = b[2] << 8 | b[3];
+        if (b[1] >= 0xC0 && b[1] <= 0xC2) {
+          if (fread(b, 1, 5, f) == 5) {
+            *h = b[1] << 8 | b[2];
+            *w = b[3] << 8 | b[4];
+            ok = true;
+          }
+          break;
+        }
+        fseek(f, len - 2, SEEK_CUR);
+      }
+    }
+  }
+  fclose(f);
+  return ok && *w > 0 && *h > 0;
+}
+
+void drawSideImage(const Rect &r, const std::string &rel, const Settings &s) {
+  if (r.w <= 0 || rel.empty()) return;
+  uint16_t bg = 0;
+  Theme::parseHex(s.side_bg, &bg);
+  M5.Display.fillRect(r.x, r.y, r.w, r.h, bg);
+  if (!sdcard::mounted() || rel.find("..") != std::string::npos) return;
+  const std::string vfs = std::string(sdcard::mountPoint()) + "/flapboard/" + rel;   // POSIX path
+  const std::string fsp = "/flapboard/" + rel;                                       // SD_MMC (Arduino FS) path
+  std::string lower = rel;
+  for (auto &c : lower) c = (char)tolower((unsigned char)c);
+  const bool png = lower.size() > 4 && lower.compare(lower.size() - 4, 4, ".png") == 0;
+  const bool jpg = (lower.size() > 4 && lower.compare(lower.size() - 4, 4, ".jpg") == 0) ||
+                   (lower.size() > 5 && lower.compare(lower.size() - 5, 5, ".jpeg") == 0);
+  float zx = 0, zy = 0;   // 0, 0: fit inside the box ("contain")
+  int iw, ih;
+  if (s.side_fit == "cover" && imageSize(vfs, &iw, &ih)) zx = zy = std::max(r.w / (float)iw, r.h / (float)ih);
+  M5.Display.setClipRect(r.x, r.y, r.w, r.h);
+  bool ok = false;
+  if (png) ok = M5.Display.drawPngFile((fs::FS &)SD_MMC, fsp.c_str(), r.x, r.y, r.w, r.h, 0, 0, zx, zy, middle_center);
+  else if (jpg) ok = M5.Display.drawJpgFile((fs::FS &)SD_MMC, fsp.c_str(), r.x, r.y, r.w, r.h, 0, 0, zx, zy, middle_center);
+  M5.Display.clearClipRect();
+  if (!ok) note("sign: could not draw side image %s (PNG or baseline JPEG only)", rel.c_str());
+}
 
 // ---- quick panel ------------------------------------------------------------
 volatile bool g_panel_req = false, g_panel_open = false;
@@ -144,7 +298,9 @@ void drawPanel() {
 }
 
 // Returns true while the panel is up (the board is not drawn meanwhile).
-bool runPanel(Board &board, Renderer &ren, PanelSurface &surf, const Theme &theme) {
+struct SignState;
+void redrawAll(SignState &st);
+bool runPanel(SignState &st) {
   if (g_panel_req) {
     g_panel_req = false;
     if (!g_panel_open) {
@@ -170,10 +326,7 @@ bool runPanel(Board &board, Renderer &ren, PanelSurface &surf, const Theme &them
   }
   if ((int32_t)(millis() - g_panel_until) >= 0) {
     g_panel_open = false;
-    M5.Display.fillRect(kPanel.x, kPanel.y, kPanel.w, kPanel.h, theme.background);
-    ren.drawBackground(surf);
-    ren.invalidate();
-    board.markAllDirty();
+    redrawAll(st);
     return false;
   }
   return true;
@@ -199,7 +352,8 @@ void bench(Renderer &ren, PanelSurface &surf, const GlyphSet &g, const LayoutRes
   time("memcpy same face -> internal (cached)", [&](int) { memcpy(in_ram, g.face(5), bytes); });
   time("memcpy internal -> framebuffer columns", [&](int i) {
     const Rect r = lay.cell(i % 6, (i / 6) % 22);
-    for (int c = 0; c < w; c++) memcpy(surf.column(r.x + c, r.y), in_ram + (size_t)c * h, (size_t)h * 2);
+    int step;
+    for (int c = 0; c < w; c++) memcpy(surf.column(r.x + c, r.y, &step), in_ram + (size_t)c * h, (size_t)h * 2);
   });
   time("cache msync of one cell's rows", [&](int i) {
     const Rect r = lay.cell(i % 6, (i / 6) % 22);
@@ -238,41 +392,99 @@ const char *const kDemo[] = {
     "NEXT STOP|GRAND CENTRAL TERMINAL",
 };
 
-void renderTask(void *) {
-  const Drum drum = Drum::vestaboard();
-  const Theme theme = Theme::named("solari");
+// Everything the board is drawn from, rebuilt when the layout settings change.
+struct SignState {
+  Drum drum = Drum::vestaboard();
+  Settings set;
+  std::string key;
   LayoutInput li;
-  li.screen_w = M5.Display.width();
-  li.screen_h = M5.Display.height();
-  const LayoutResult lay = computeLayout(li);
-
+  LayoutResult lay;
+  Theme theme;
   TrueTypeFont font;
-  const fonts::Font *chosen = &fonts::kFonts[0];
-  for (const auto &ff : fonts::kFonts)
-    if (strcmp(ff.name, "BebasNeue-Regular") == 0) chosen = &ff;
-  font.load(chosen->data, chosen->len);
-
-  static GlyphSet glyphs(kPsram);
-  const uint32_t t0 = millis();
-  glyphs.build(drum, theme, font, lay.cell_w, lay.cell_h, 0.62f, /*column_major=*/true);
-  note("sign: %dx%d cells of %dx%d px, font %s, glyphs %u KB built in %lu ms", li.rows, li.cols, lay.cell_w,
-       lay.cell_h, chosen->name, (unsigned)(glyphs.bytes() / 1024), (unsigned long)(millis() - t0));
-  static Renderer ren(kPsram);
-  ren.setup(lay, &glyphs, theme);
+  GlyphSet glyphs{kPsram};
+  Renderer ren{kPsram};
   Board board;
-  board.resize(li.rows, li.cols, (int)drum.size());
-  board.setMotion(Motion());
-
   PanelSurface surf;
-  if (!surf.begin()) note("sign: framebuffer not available (rotation %d)", M5.Display.getRotation());
-  M5.Display.fillScreen(theme.background);
-  ren.drawBackground(surf);
+  std::string message = "";
+  bool fits = true;
+  size_t glyph_bytes = 0;
+};
+SignState *g_sign = nullptr;
+
+// The glyph cache holds every drum position at the cell size; huge flaps
+// (one row of four, say) would want tens of MB, so cells are capped.
+constexpr size_t kGlyphBudget = 6u * 1024 * 1024;
+
+void redrawAll(SignState &st) {
+  M5.Display.fillScreen(st.theme.background);
+  drawSideImage(st.lay.left, st.set.left, st.set);
+  drawSideImage(st.lay.right, st.set.right, st.set);
+  st.ren.drawBackground(st.surf);
+  st.ren.invalidate();
+  st.board.markAllDirty();
+}
+
+void rebuild(SignState &st, const Settings &s) {
+  const uint32_t t0 = millis();
+  st.set = s;
+  st.key = s.layoutKey();
+  M5.Display.setRotation(s.flipped ? 1 : 3);
+  st.surf.begin();
+  st.li = LayoutInput();
+  st.li.screen_w = M5.Display.width();
+  st.li.screen_h = M5.Display.height();
+  st.li.rows = s.rows;
+  st.li.cols = s.cols;
+  st.li.flap_w = s.flap_w;
+  st.li.aspect = s.aspect;
+  st.li.gap = s.gap;
+  st.li.margin = s.margin;
+  st.li.left_image = !s.left.empty();
+  st.li.right_image = !s.right.empty();
+  st.li.side_pct = s.side_pct;
+  st.lay = computeLayout(st.li);
+  st.fits = st.lay.fits;
+  const size_t per_px = 2 * st.drum.size();
+  if ((size_t)st.lay.cell_w * st.lay.cell_h * per_px > kGlyphBudget) {
+    st.li.flap_w = (int)std::sqrt(kGlyphBudget / (per_px * s.aspect));
+    st.lay = computeLayout(st.li);
+    note("sign: flaps limited to %d px wide (glyph memory)", st.lay.cell_w);
+  }
+  st.theme = Theme::custom(s.theme, s.c_bg, s.c_flap, s.c_glyph);
+  loadFont(st.font, s.font);
+  st.glyphs.build(st.drum, st.theme, st.font, st.lay.cell_w, st.lay.cell_h, s.cap, /*column_major=*/true);
+  st.glyph_bytes = st.glyphs.bytes();
+  st.ren.setup(st.lay, &st.glyphs, st.theme);
+  st.board.resize(s.rows, s.cols, (int)st.drum.size());
+  st.board.setMotion(s.motion);
+  st.board.jump(layoutMessage(st.drum, st.message, s.rows, s.cols));   // the current message, re-flowed
+  redrawAll(st);
+  note("sign: %dx%d cells of %dx%d px, %s, theme %s, glyphs %u KB, rebuilt in %lu ms%s", s.rows, s.cols,
+       st.lay.cell_w, st.lay.cell_h, g_font_used.c_str(), s.theme.c_str(), (unsigned)(st.glyph_bytes / 1024),
+       (unsigned long)(millis() - t0), st.fits ? "" : " (fixed flap width too big: shrunk to fit)");
+}
+
+void renderTask(void *) {
+  SignState &st = *new SignState();
+  g_sign = &st;
+  rebuild(st, readSettings());
 
   size_t demo = 0;
   uint32_t next_demo = millis() + 1500;
-  uint32_t last_report = millis();
+  uint32_t last_report = millis(), last_settings = millis();
   for (;;) {
     const uint32_t now = millis();
+    // Settings: a layout change rebuilds; a timing change just applies.
+    if (now - last_settings >= 500) {
+      last_settings = now;
+      const Settings s = readSettings();
+      if (s.layoutKey() != st.key) rebuild(st, s);
+      else if (s.motion.flip_ms != st.set.motion.flip_ms || s.motion.speed_variance != st.set.motion.speed_variance ||
+               s.motion.start != st.set.motion.start) {
+        st.set.motion = s.motion;
+        st.board.setMotion(s.motion);
+      }
+    }
     std::string msg;
     bool have = false;
     xSemaphoreTake(g_mux, portMAX_DELAY);
@@ -282,42 +494,41 @@ void renderTask(void *) {
       g_has_pending = false;
     }
     xSemaphoreGive(g_mux);
-    if (!have && now >= next_demo && !board.busy(now)) {
+    if (!have && now >= next_demo && !st.board.busy(now)) {
       msg = kDemo[demo++ % (sizeof(kDemo) / sizeof(kDemo[0]))];
       have = true;
     }
     if (have) {
-      board.show(layoutMessage(drum, msg, li.rows, li.cols), now);
-      next_demo = board.finishMs() + 8000;
+      st.message = msg;
+      st.board.show(layoutMessage(st.drum, msg, st.set.rows, st.set.cols), now);
+      next_demo = st.board.finishMs() + 8000;
     }
     if (g_bench) {
       g_bench = false;
-      bench(ren, surf, glyphs, lay);
-      ren.invalidate();
-      for (int i = 0; i < board.cells(); i++) board.takeDirty(i, 0);   // (all redrawn below)
-      board.jump(layoutMessage(drum, "BENCH DONE", li.rows, li.cols));
+      bench(st.ren, st.surf, st.glyphs, st.lay);
+      redrawAll(st);
     }
-    board.update(now, &g_flips, sound::kLookaheadMs);   // landings reported early: clacks land on their sample
+    st.board.update(now, &g_flips, sound::kLookaheadMs);   // landings reported early: clacks land on their sample
     const int64_t a = esp_timer_get_time();
-    surf.blit_us = surf.sync_us = 0;
+    st.surf.blit_us = st.surf.sync_us = 0;
     int n = 0;
-    if (runPanel(board, ren, surf, theme)) {
+    if (runPanel(st)) {
       // Cells the panel leaves visible keep turning; the covered ones are
-      // redrawn when it closes (markAllDirty).
-      for (int i = 0; i < board.cells(); i++) {
-        const Rect r = lay.cell(i / board.cols(), i % board.cols());
+      // redrawn when it closes.
+      for (int i = 0; i < st.board.cells(); i++) {
+        const Rect r = st.lay.cell(i / st.board.cols(), i % st.board.cols());
         const bool covered = r.x < kPanel.x + kPanel.w && r.x + r.w > kPanel.x && r.y < kPanel.y + kPanel.h &&
                              r.y + r.h > kPanel.y;
-        if (covered || !board.takeDirty(i, now)) continue;
-        ren.drawCell(surf, i / board.cols(), i % board.cols(), board.view(i, now));
+        if (covered || !st.board.takeDirty(i, now)) continue;
+        st.ren.drawCell(st.surf, i / st.board.cols(), i % st.board.cols(), st.board.view(i, now));
         n++;
       }
     } else {
-      n = ren.drawDirty(surf, board, now);
+      n = st.ren.drawDirty(st.surf, st.board, now);
     }
     const uint64_t us = (uint64_t)(esp_timer_get_time() - a);
-    g_stats.blit_us += surf.blit_us;
-    g_stats.sync_us += surf.sync_us;
+    g_stats.blit_us += st.surf.blit_us;
+    g_stats.sync_us += st.surf.sync_us;
     if (n) {
       g_stats.frames++;
       g_stats.cells += n;
@@ -327,10 +538,10 @@ void renderTask(void *) {
     }
     if (now - last_report >= 2000) {
       if (g_stats.frames) {
-        note("sign: %lu frames, %lu cells/frame avg (max %lu), draw %.2f ms avg (max %.2f), of which blit %.2f (cache sync %.2f), per cell %.3f ms",
+        note("sign: %lu frames, %lu cells/frame avg (max %lu), draw %.2f ms avg (max %.2f), per cell %.3f ms",
              (unsigned long)g_stats.frames, (unsigned long)(g_stats.cells / g_stats.frames),
              (unsigned long)g_stats.max_cells, g_stats.draw_us / 1000.0f / g_stats.frames, g_stats.max_us / 1000.0f,
-             g_stats.blit_us / 1000.0f / g_stats.frames, g_stats.sync_us / 1000.0f / g_stats.frames, g_stats.draw_us / 1000.0f / g_stats.cells);
+             g_stats.draw_us / 1000.0f / g_stats.cells);
         xSemaphoreTake(g_mux, portMAX_DELAY);
         g_last = g_stats;
         xSemaphoreGive(g_mux);
@@ -348,7 +559,6 @@ void renderTask(void *) {
 
 void begin() {
   g_mux = xSemaphoreCreateMutex();
-  M5.Display.setRotation(3);   // landscape, the same way up as Tabulous5's default
   // Core 1, above the Arduino loop; its stack in PSRAM (internal RAM feeds Wi-Fi).
   xTaskCreatePinnedToCoreWithCaps(renderTask, "sign", 16384, nullptr, 3, nullptr, 1,
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -373,11 +583,19 @@ std::string statsJson() {
   xSemaphoreTake(g_mux, portMAX_DELAY);
   const Stats s = g_last;
   xSemaphoreGive(g_mux);
+  std::string extra;
+  if (g_sign) {
+    char e[200];
+    snprintf(e, sizeof(e), ",\"cell_w\":%d,\"cell_h\":%d,\"fits\":%s,\"glyph_kb\":%u,\"font\":\"%s\"",
+             g_sign->lay.cell_w, g_sign->lay.cell_h, g_sign->fits ? "true" : "false",
+             (unsigned)(g_sign->glyph_bytes / 1024), g_font_used.c_str());
+    extra = e;
+  }
   char b[160];
-  snprintf(b, sizeof(b), "{\"frames\":%lu,\"avg_cells\":%lu,\"max_cells\":%lu,\"avg_ms\":%.2f,\"max_ms\":%.2f}",
+  snprintf(b, sizeof(b), "{\"frames\":%lu,\"avg_cells\":%lu,\"max_cells\":%lu,\"avg_ms\":%.2f,\"max_ms\":%.2f",
            (unsigned long)s.frames, (unsigned long)(s.frames ? s.cells / s.frames : 0), (unsigned long)s.max_cells,
            s.frames ? s.draw_us / 1000.0 / s.frames : 0.0, s.max_us / 1000.0);
-  return b;
+  return std::string(b) + extra + "}";
 }
 
 }  // namespace sign

@@ -106,7 +106,28 @@ struct Mixer : FlipSink {
 
 }  // namespace
 
+// --layout-grid: the C++ layout for a fixed grid of inputs, one JSON object a
+// line; tools/check_layout.mjs runs web/layout.js over the same grid.
+static int layoutGrid() {
+  for (int rows = 1; rows <= 12; rows += 1)
+    for (int cols = 1; cols <= 40; cols += 3)
+      for (int flap : {0, 40, 500})
+        for (float aspect : {1.0f, 1.4f, 1.75f})
+          for (int gap : {0, 4, 10})
+            for (int sides = 0; sides < 3; sides++)
+              for (int pct : {10, 25}) {
+                LayoutInput in;
+                in.rows = rows; in.cols = cols; in.flap_w = flap; in.aspect = aspect; in.gap = gap;
+                in.left_image = sides >= 1; in.right_image = sides == 2; in.side_pct = pct;
+                const LayoutResult r = computeLayout(in);
+                printf("{\"cw\":%d,\"ch\":%d,\"bx\":%d,\"by\":%d,\"bw\":%d,\"bh\":%d,\"lw\":%d,\"rx\":%d,\"rw\":%d,\"fits\":%d}\n",
+                       r.cell_w, r.cell_h, r.board.x, r.board.y, r.board.w, r.board.h, r.left.w, r.right.x, r.right.w, r.fits);
+              }
+  return 0;
+}
+
 int main(int argc, char **argv) {
+  if (argc > 1 && std::string(argv[1]) == "--layout-grid") return layoutGrid();
   std::string out = "build/flapsim.mp4", font_path = "assets/fonts/BebasNeue-Regular.ttf", theme_name = "solari";
   std::string sounds = "sounds/generated/solari_", png;
   int rows = 6, cols = 22;

@@ -134,7 +134,8 @@ const uint16_t *Renderer::compose(const CellView &v) {
 
 void Renderer::drawCell(Surface &s, int row, int col, const CellView &v) {
   const Rect r = layout_.cell(row, col);
-  if (glyphs_->columnMajor() && s.column(r.x, r.y)) {
+  int step = 1;
+  if (glyphs_->columnMajor() && s.column(r.x, r.y, &step)) {
     const int h = layout_.cell_h, h1 = h / 2;
     int fh, dark, shadow;
     flipParams(v, &fh, &dark, &shadow);
@@ -151,8 +152,18 @@ void Renderer::drawCell(Surface &s, int row, int col, const CellView &v) {
         else y0 = hinge_lo;
       }
     }
-    for (int c = 0; c < r.w; c++)
-      composeColumn(v, c, s.column(r.x + c, r.y), fh, dark, shadow, hinge_lo, hinge_hi, inset, y0, y1);
+    if (step == 1) {
+      for (int c = 0; c < r.w; c++)
+        composeColumn(v, c, s.column(r.x + c, r.y, &step), fh, dark, shadow, hinge_lo, hinge_hi, inset, y0, y1);
+    } else {
+      // Memory runs up the column: compose into the scratch column, then
+      // copy it backwards.
+      for (int c = 0; c < r.w; c++) {
+        composeColumn(v, c, scratch_, fh, dark, shadow, hinge_lo, hinge_hi, inset, y0, y1);
+        uint16_t *dst = s.column(r.x + c, r.y, &step);
+        for (int y = y0; y < y1; y++) dst[-y] = scratch_[y];
+      }
+    }
     s.columnsDone(r.x, r.y, r.w, r.h);
     if (idx < (int)last_.size()) last_[idx] = {(int16_t)v.cur, (int16_t)v.next, phase};
     return;

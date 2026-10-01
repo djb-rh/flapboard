@@ -32,6 +32,7 @@
 #include "note.h"
 #include "sdcard.h"
 #include "sign.h"
+#include "sound.h"
 #include "status.h"
 
 namespace flapboard {
@@ -225,6 +226,19 @@ int run(const std::string &line) {
     return rc;
   }
   if (c == "mem") return cmdMem();
+  // Touch stand-ins for testing without a finger: what a long press / tap does.
+  if (c == "hold") {
+    sign::openPanel();
+    return 0;
+  }
+  if (c == "tap" && a.size() > 2) {
+    if (sign::panelOpen()) sign::panelTap(atoi(a[1].c_str()), atoi(a[2].c_str()));
+    return 0;
+  }
+  if (c == "audiocap") {   // audiocap [seconds] -> /sdcard/flapboard/capture.wav
+    sound::capture("/sdcard/flapboard/capture.wav", a.size() > 1 ? (float)atof(a[1].c_str()) : 10.0f);
+    return 0;
+  }
   if (c == "bench") {
     sign::runBench();
     return 0;

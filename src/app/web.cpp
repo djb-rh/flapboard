@@ -18,6 +18,7 @@
 #include "net.h"
 #include "note.h"
 #include "sign.h"
+#include "sound.h"
 #include "status.h"
 
 namespace flapboard {
@@ -193,6 +194,19 @@ esp_err_t handleMessage(httpd_req_t *req) {
   if (deserializeJson(d, body) || !d["text"].is<const char *>()) return sendError(req, 400, "expected {\"text\": \"...\"}");
   sign::show(d["text"].as<std::string>());
   return sendJson(req, 200, "{\"shown\":true}");
+}
+
+// Volume: {"volume": 0-100} and/or {"enabled": bool}; applied at once.
+esp_err_t handleVolume(httpd_req_t *req) {
+  std::string body;
+  if (!readBody(req, &body, 256)) return sendError(req, 400, "request too large");
+  JsonDocument d;
+  if (deserializeJson(d, body)) return sendError(req, 400, "invalid JSON");
+  if (d["enabled"].is<bool>()) sound::setEnabled(d["enabled"].as<bool>());
+  if (d["volume"].is<int>()) sound::setVolume(d["volume"].as<int>(), true);
+  char b[64];
+  snprintf(b, sizeof(b), "{\"volume\":%d,\"enabled\":%s}", sound::volume(), sound::enabled() ? "true" : "false");
+  return sendJson(req, 200, b);
 }
 
 esp_err_t handleLog(httpd_req_t *req) {
@@ -403,7 +417,10 @@ esp_err_t handleLibUpload(httpd_req_t *req) {
   for (size_t i = 0; i < sink.saved.size(); i++) j += (i ? "," : "") + library::jsonStr(sink.saved[i]);
   j += "],\"skipped\":[";
   for (size_t i = 0; i < sink.skipped.size(); i++) j += (i ? "," : "") + library::jsonStr(sink.skipped[i]);
-  for (auto &s : sink.saved) note("upload: %s", s.c_str());
+  for (auto &s : sink.saved) {
+    note("upload: %s", s.c_str());
+    if (s.rfind("sounds/", 0) == 0) sound::reloadClips();   // a new clack takes effect at once
+  }
   return sendJson(req, 200, j + "]}");
 }
 
@@ -423,6 +440,7 @@ esp_err_t handleLibOp(httpd_req_t *req) {
     reply = "{\"created\":" + library::jsonStr(out) + "}";
   } else if (uri.rfind("/library/delete", 0) == 0) {
     e = library::remove(path);
+    if (e == library::Err::Ok && library::normalise(path).rfind("sounds", 0) == 0) sound::reloadClips();
     reply = "{\"deleted\":" + library::jsonStr(path) + "}";
   } else {
     e = library::rename(path, name, &out);
@@ -460,6 +478,7 @@ void begin() {
       {"/api/config", HTTP_POST, handleConfigPost},
       {"/api/log", HTTP_GET, handleLog},
       {"/api/message", HTTP_POST, handleMessage},
+      {"/api/volume", HTTP_POST, handleVolume},
       {"/api/reboot", HTTP_POST, handleReboot},
       {"/api/c6update", HTTP_POST, handleCoprocUpdate},
       {"/api/nets", HTTP_GET, handleNets},

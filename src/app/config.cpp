@@ -18,7 +18,10 @@ constexpr const char *kTmp = "/config.json.tmp";
 
 // Every setting, with its default. Later phases add keys here.
 constexpr const char *kDefaults = R"JSON({
-  "device_name": "FlapBoard"
+  "device_name": "FlapBoard",
+  "sound_enabled": true,
+  "sound_volume": 60,
+  "sound_offset_ms": 0
 })JSON";
 
 JsonDocument g_doc;

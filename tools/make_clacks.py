@@ -12,7 +12,9 @@ Each style has six variations with slightly different parameters, so a whole
 board never plays the same waveform twice in a row.
 
 Seeded, so re-running produces byte-identical files.
-Usage: tools/make_clacks.py [outdir] [rate]   (defaults: sounds/generated 44100)
+Usage: tools/make_clacks.py [outdir] [rate] [style prefix]
+  defaults: sounds/generated 44100, every style named <style>_<n>.wav
+  tools/make_clacks.py sounds/device 22050 solari clack   -> the firmware's clack_1..6.wav
 """
 import math
 import os
@@ -23,6 +25,8 @@ import wave
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else "sounds/generated"
 RATE = int(sys.argv[2]) if len(sys.argv) > 2 else 44100
+ONLY = sys.argv[3] if len(sys.argv) > 3 else None
+PREFIX = sys.argv[4] if len(sys.argv) > 4 else None
 
 # name: impact (dur s, lowpass 0-1), flap modes [(Hz, tau s, gain)], body (Hz, tau, gain),
 #       bounce (delay range s, gain), overall length s
@@ -97,10 +101,14 @@ def write(path, samples):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
+    n = 0
     for si, style in enumerate(STYLES):
+        if ONLY and style != ONLY:
+            continue
         for v in range(6):
-            write(os.path.join(OUT, "%s_%d.wav" % (style, v + 1)), clack(style, 1000 * si + v))
-    print("wrote %d clacks to %s at %d Hz" % (len(STYLES) * 6, OUT, RATE))
+            write(os.path.join(OUT, "%s_%d.wav" % (PREFIX or style, v + 1)), clack(style, 1000 * si + v))
+            n += 1
+    print("wrote %d clacks to %s at %d Hz" % (n, OUT, RATE))
 
 
 if __name__ == "__main__":

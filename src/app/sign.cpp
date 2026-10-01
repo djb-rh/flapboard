@@ -9,6 +9,8 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <algorithm>
+
 #include <flapcore/board.h>
 #include <flapcore/drum.h>
 #include <flapcore/glyphs.h>
@@ -19,7 +21,10 @@
 #include <flapcore/truetype.h>
 
 #include "generated/fonts.h"
+#include "config.h"
+#include "net.h"
 #include "note.h"
+#include "sound.h"
 
 namespace flapboard {
 namespace sign {
@@ -28,7 +33,7 @@ namespace {
 using namespace flapcore;
 
 void *psramAlloc(size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }
-const Allocator kPsram{psramAlloc, heap_caps_free};
+const flapcore::Allocator kPsram{psramAlloc, heap_caps_free};
 
 // Straight into the DSI framebuffer. The panel is portrait (720x1280) and the
 // sign landscape (rotation 3): logical (x, y) is panel row ph-1-x, column y,
@@ -81,6 +86,102 @@ struct PanelSurface : Surface {
 
 SemaphoreHandle_t g_mux;
 volatile bool g_bench = false;
+
+// ---- quick panel ------------------------------------------------------------
+volatile bool g_panel_req = false, g_panel_open = false;
+volatile int g_tap_x = -1, g_tap_y = -1;
+uint32_t g_panel_until = 0;
+
+struct Button {
+  int x, y, w, h;
+  bool hit(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
+};
+const Button kPanel{240, 110, 800, 500};
+const Button kMinus{290, 290, 150, 150}, kPlus{840, 290, 150, 150};
+const Button kMute{290, 480, 330, 96}, kClose{660, 480, 330, 96};
+
+void drawButton(const Button &b, const char *label, uint16_t bg, uint16_t fg, const lgfx::IFont *font) {
+  auto &d = M5.Display;
+  d.fillRoundRect(b.x, b.y, b.w, b.h, 18, bg);
+  d.setFont(font);
+  d.setTextColor(fg, bg);
+  d.setTextDatum(middle_center);
+  d.drawString(label, b.x + b.w / 2, b.y + b.h / 2);
+}
+
+void drawPanel() {
+  auto &d = M5.Display;
+  const uint16_t panel = 0x2124, ink = 0xF79E, dim = 0xA534, accent = 0xEC20, btn = 0x39C7;
+  d.startWrite();
+  d.fillRoundRect(kPanel.x, kPanel.y, kPanel.w, kPanel.h, 26, panel);
+  d.setTextDatum(top_left);
+  d.setFont(&lgfx::fonts::FreeSansBold18pt7b);
+  d.setTextColor(ink, panel);
+  const std::string ip = net::ip();
+  d.drawString((config::hostname() + ".local").c_str(), kPanel.x + 50, kPanel.y + 36);
+  d.setFont(&lgfx::fonts::FreeSans12pt7b);
+  d.setTextColor(dim, panel);
+  d.drawString((ip.empty() ? std::string("Wi-Fi: ") + net::statusText() : "http://" + ip + "/").c_str(), kPanel.x + 50,
+               kPanel.y + 90);
+  d.drawString("VOLUME", kPanel.x + 50, kPanel.y + 140);
+  drawButton(kMinus, "-", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
+  drawButton(kPlus, "+", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
+  // The level: a bar between the buttons, with the number on it.
+  const int bx = kMinus.x + kMinus.w + 40, bw = kPlus.x - 40 - bx, by = kMinus.y + 45, bh = 60;
+  const bool on = sound::enabled();
+  const int v = sound::volume();
+  d.fillRoundRect(bx, by, bw, bh, 12, 0x18E3);
+  if (on && v > 0) d.fillRoundRect(bx, by, std::max(24, bw * v / 100), bh, 12, accent);
+  d.setFont(&lgfx::fonts::FreeSansBold18pt7b);
+  d.setTextDatum(middle_center);
+  d.setTextColor(ink);
+  char t[16];
+  snprintf(t, sizeof(t), on ? "%d%%" : "MUTED", v);
+  d.drawString(t, bx + bw / 2, by + bh / 2);
+  drawButton(kMute, on ? "Mute" : "Unmute", on ? btn : accent, ink, &lgfx::fonts::FreeSansBold18pt7b);
+  drawButton(kClose, "Close", btn, ink, &lgfx::fonts::FreeSansBold18pt7b);
+  d.endWrite();
+}
+
+// Returns true while the panel is up (the board is not drawn meanwhile).
+bool runPanel(Board &board, Renderer &ren, PanelSurface &surf, const Theme &theme) {
+  if (g_panel_req) {
+    g_panel_req = false;
+    if (!g_panel_open) {
+      g_panel_open = true;
+      drawPanel();
+    }
+    g_panel_until = millis() + 15000;
+  }
+  if (!g_panel_open) return false;
+  const int x = g_tap_x, y = g_tap_y;
+  if (x >= 0) {
+    g_tap_x = g_tap_y = -1;
+    g_panel_until = millis() + 15000;
+    bool close = !kPanel.hit(x, y) || kClose.hit(x, y);
+    if (kMinus.hit(x, y)) sound::setVolume(sound::volume() - 10);
+    else if (kPlus.hit(x, y)) sound::setVolume(sound::volume() + 10);
+    else if (kMute.hit(x, y)) {
+      sound::setEnabled(!sound::enabled());
+      if (sound::enabled()) sound::setVolume(sound::volume());   // a preview when unmuting
+    }
+    if (!close) drawPanel();
+    else g_panel_until = 0;
+  }
+  if ((int32_t)(millis() - g_panel_until) >= 0) {
+    g_panel_open = false;
+    M5.Display.fillRect(kPanel.x, kPanel.y, kPanel.w, kPanel.h, theme.background);
+    ren.drawBackground(surf);
+    ren.invalidate();
+    board.markAllDirty();
+    return false;
+  }
+  return true;
+}
+
+struct ToMixer : FlipSink {
+  void onFlip(const FlipEvent &e) override { sound::flip(e.at_ms); }
+} g_flips;
 
 // Serial 'bench': times each part of drawing a cell, 200 times each.
 void bench(Renderer &ren, PanelSurface &surf, const GlyphSet &g, const LayoutResult &lay) {
@@ -196,10 +297,24 @@ void renderTask(void *) {
       for (int i = 0; i < board.cells(); i++) board.takeDirty(i, 0);   // (all redrawn below)
       board.jump(layoutMessage(drum, "BENCH DONE", li.rows, li.cols));
     }
-    board.update(now, nullptr);   // flip events go to the mixer in Phase 3
+    board.update(now, &g_flips, sound::kLookaheadMs);   // landings reported early: clacks land on their sample
     const int64_t a = esp_timer_get_time();
     surf.blit_us = surf.sync_us = 0;
-    const int n = ren.drawDirty(surf, board, now);
+    int n = 0;
+    if (runPanel(board, ren, surf, theme)) {
+      // Cells the panel leaves visible keep turning; the covered ones are
+      // redrawn when it closes (markAllDirty).
+      for (int i = 0; i < board.cells(); i++) {
+        const Rect r = lay.cell(i / board.cols(), i % board.cols());
+        const bool covered = r.x < kPanel.x + kPanel.w && r.x + r.w > kPanel.x && r.y < kPanel.y + kPanel.h &&
+                             r.y + r.h > kPanel.y;
+        if (covered || !board.takeDirty(i, now)) continue;
+        ren.drawCell(surf, i / board.cols(), i % board.cols(), board.view(i, now));
+        n++;
+      }
+    } else {
+      n = ren.drawDirty(surf, board, now);
+    }
     const uint64_t us = (uint64_t)(esp_timer_get_time() - a);
     g_stats.blit_us += surf.blit_us;
     g_stats.sync_us += surf.sync_us;
@@ -247,6 +362,12 @@ void show(const std::string &text) {
 }
 
 void runBench() { g_bench = true; }
+void openPanel() { g_panel_req = true; }
+bool panelOpen() { return g_panel_open; }
+void panelTap(int x, int y) {
+  g_tap_y = y;
+  g_tap_x = x;
+}
 
 std::string statsJson() {
   xSemaphoreTake(g_mux, portMAX_DELAY);

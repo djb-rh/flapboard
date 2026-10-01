@@ -12,5 +12,11 @@ void show(const std::string &text);        // any task: queue a message
 std::string statsJson();                   // last frame timings, for /api/status
 void runBench();                           // serial 'bench': time the drawing steps
 
+// The quick panel (long press anywhere): volume, mute, the sign's address.
+// Touch is read by the main loop and handed over; the render task draws.
+void openPanel();
+bool panelOpen();
+void panelTap(int x, int y);
+
 }  // namespace sign
 }  // namespace flapboard

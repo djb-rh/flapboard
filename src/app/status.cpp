@@ -11,6 +11,7 @@
 #include "net.h"
 #include "sdcard.h"
 #include "sign.h"
+#include "sound.h"
 
 namespace flapboard {
 namespace status {
@@ -95,6 +96,11 @@ std::string json() {
   JsonDocument sg;
   deserializeJson(sg, sign::statsJson());
   d["sign"] = sg;
+  JsonDocument sd2;
+  deserializeJson(sd2, sound::statsJson());
+  d["sound"] = sd2;
+  d["sound"]["volume"] = sound::volume();
+  d["sound"]["enabled"] = sound::enabled();
   std::string out;
   serializeJson(d, out);
   return out;

@@ -73,3 +73,13 @@ Per cell, on-device `bench` (serial):
   arithmetic, is now the limit. Half-cell redraws help only once frames outpace flaps.
 - Screenshots: a note() printed by another task mid-transfer shifted the picture by one line of text;
   notes are held off serial during shot/get/put.
+
+## Phase 3 sound (2026-09-30)
+- M5Unified Speaker, one channel, 512-sample blocks at 22.05 kHz (23 ms), two queued. 256-sample
+  blocks underran during busy moments; 512 gives 46 ms of headroom.
+- Landings are reported 80 ms ahead (Board::update lookahead), so each clack starts on its own
+  sample; 0 late drops measured. A full-board change peaks around 1,000 clacks/s; 64 voices.
+- **Flash writes only from the main loop.** A LittleFS write (saving the volume) from the audio task,
+  whose stack is in PSRAM, asserted `esp_task_stack_is_sane_cache_disabled()` and reset the board.
+  The render and audio tasks keep PSRAM stacks and must never write flash/NVS.
+- Serial `audiocap N` records the mixer output to /sdcard/flapboard/capture.wav.

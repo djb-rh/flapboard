@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "flapcore/board.h"
+#include "flapcore/clackmixer.h"
 #include "flapcore/drum.h"
 #include "flapcore/layout.h"
 #include "flapcore/message.h"
@@ -271,6 +272,75 @@ void test_column_path_matches_row_path() {
   TEST_ASSERT_EQUAL(8, b.done);
 }
 
+void test_board_lookahead_reports_once() {
+  Board b;
+  b.resize(1, 1, (int)kDrum.size());
+  Motion m;
+  m.flip_ms = 100;
+  m.speed_variance = 0;
+  m.start = StartMode::Together;
+  b.setMotion(m);
+  b.show({10}, 0);
+  Count c;
+  b.update(0, &c, 150);              // landings at 100 reported early
+  TEST_ASSERT_EQUAL(1, (int)c.ev.size());
+  TEST_ASSERT_EQUAL_UINT32(100, c.ev[0].at_ms);
+  b.update(50, &c, 150);             // nothing new until 200 is within reach
+  TEST_ASSERT_EQUAL(2, (int)c.ev.size());   // 200 <= 50+150
+  b.show({4}, 150, false);           // retarget mid-flap: the landing at 200 is shared
+  b.update(150, &c, 150);            // reach 300: only the new 300 is reported
+  TEST_ASSERT_EQUAL(3, (int)c.ev.size());
+  TEST_ASSERT_EQUAL_UINT32(300, c.ev[2].at_ms);
+  b.update(1000, &c, 150);           // D at 400 (C at 300 was the 3rd)
+  TEST_ASSERT_EQUAL(4, (int)c.ev.size());
+  TEST_ASSERT_EQUAL_UINT32(400, c.ev[3].at_ms);
+}
+
+void test_mixer_places_clacks_on_their_sample() {
+  ClackMixer mx;
+  mx.setup(1000, 4);   // 1 kHz: one frame per ms
+  static int16_t click[10];
+  for (int i = 0; i < 10; i++) click[i] = 10000;
+  mx.setClips({{click, 10}});
+  mx.setVolume(1.0f);
+  mx.push(105);
+  std::vector<int16_t> out(50);
+  mx.render(out.data(), 50, 100.0);   // block covers board time 100..150
+  int first = -1;
+  for (int i = 0; i < 50; i++)
+    if (out[i] != 0) { first = i; break; }
+  TEST_ASSERT_EQUAL(5, first);
+  auto st = mx.takeStats();
+  TEST_ASSERT_EQUAL(1, (int)st.started);
+  mx.push(130);                       // the next block: 150..200 -> this one is late
+  mx.push(10);                        // far too late: dropped
+  mx.push(220);                       // future: kept for a later block
+  mx.render(out.data(), 50, 150.0);
+  st = mx.takeStats();
+  TEST_ASSERT_EQUAL(1, (int)st.started);
+  TEST_ASSERT_EQUAL(1, (int)st.dropped);
+  TEST_ASSERT_TRUE(out[0] != 0);      // the late one starts immediately
+  mx.render(out.data(), 50, 200.0);
+  TEST_ASSERT_EQUAL(1, (int)mx.takeStats().started);
+  TEST_ASSERT_TRUE(out[19] == 0 && out[21] != 0);   // 220 -> sample 20 (+/- interpolation)
+}
+
+void test_mixer_steals_and_never_clips() {
+  ClackMixer mx;
+  mx.setup(1000, 4);
+  static int16_t loud[200];
+  for (int i = 0; i < 200; i++) loud[i] = (i & 1) ? 30000 : -30000;
+  mx.setClips({{loud, 200}});
+  mx.setVolume(1.0f);
+  for (int i = 0; i < 10; i++) mx.push(100);   // ten at once, four voices
+  std::vector<int16_t> out(100);
+  mx.render(out.data(), 100, 100.0);
+  const auto st = mx.takeStats();
+  TEST_ASSERT_EQUAL(10, (int)st.started);
+  TEST_ASSERT_EQUAL(6, (int)st.stolen);
+  for (int16_t v : out) TEST_ASSERT_TRUE(v <= 28100 && v >= -28100);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_drum_order);
@@ -283,5 +353,8 @@ int main() {
   RUN_TEST(test_board_dirty_tracking);
   RUN_TEST(test_layout_auto_fit_and_sides);
   RUN_TEST(test_column_path_matches_row_path);
+  RUN_TEST(test_board_lookahead_reports_once);
+  RUN_TEST(test_mixer_places_clacks_on_their_sample);
+  RUN_TEST(test_mixer_steals_and_never_clips);
   return UNITY_END();
 }

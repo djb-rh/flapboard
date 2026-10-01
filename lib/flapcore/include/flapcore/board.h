@@ -53,8 +53,10 @@ class Board {
   // Sets the board instantly (boot, or after the display was off).
   void jump(const std::vector<uint16_t> &targets);
 
-  // Reports every flap that landed in (last update, now]; sink may be null.
-  void update(uint32_t now_ms, FlipSink *sink);
+  // Reports every flap that lands up to now + lookahead_ms (each once);
+  // sink may be null. The timing is deterministic, so a sound mixer can be
+  // told about a landing before it happens and put the clack on its sample.
+  void update(uint32_t now_ms, FlipSink *sink, uint32_t lookahead_ms = 0);
 
   CellView view(int cell, uint32_t now_ms) const;
   bool busy(uint32_t now_ms) const;
@@ -62,6 +64,7 @@ class Board {
   // True once per frame for cells that need drawing: while moving, and once
   // more when they stop. Also true for every cell after resize()/jump().
   bool takeDirty(int cell, uint32_t now_ms);
+  void markAllDirty();   // something drew over the board: redraw every cell
 
   int rows() const { return rows_; }
   int cols() const { return cols_; }

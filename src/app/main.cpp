@@ -13,6 +13,7 @@
 #include "net.h"
 #include "note.h"
 #include "sign.h"
+#include "sound.h"
 #include "sdcard.h"
 #include "status.h"
 #include "web.h"
@@ -45,6 +46,7 @@ void setup() {
   if (sdcard::begin()) makeLibraryFolders();
   else note("sd: no card (or not FAT32): the file library is unavailable");
 
+  sound::begin();
   sign::begin();
   net::begin();
   web::begin();
@@ -60,13 +62,29 @@ void setup() {
   esp_task_wdt_add(nullptr);
 
   note("FlapBoard %s up; reset reason %d", FLAPBOARD_VERSION, (int)esp_reset_reason());
+  M5.Touch.setHoldThresh(800);
   console::begin();
+}
+
+// Long press anywhere (0.8 s) opens the quick panel; while it is open, taps
+// go to its buttons. Touch is read here, on the main loop, the only task that
+// talks to the touch chip.
+void handleTouch() {
+  if (M5.Touch.getCount() == 0 && !M5.Touch.getDetail().wasReleased()) return;
+  const auto t = M5.Touch.getDetail();
+  if (sign::panelOpen()) {
+    if (t.wasClicked() || t.wasHold()) sign::panelTap(t.x, t.y);
+  } else if (t.wasHold()) {
+    sign::openPanel();
+  }
 }
 
 void loop() {
   esp_task_wdt_reset();
   M5.update();
+  handleTouch();
   net::loop();
+  sound::loop();
   status::update();
   console::loop();
   if (web::takeRebootRequest()) {

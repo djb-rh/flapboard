@@ -64,10 +64,14 @@ void Board::show(const std::vector<uint16_t> &targets, uint32_t now_ms, bool ful
       else if (motion_.start == StartMode::Wave) delay = (float)(i % cols_) * motion_.wave_ms_per_col;
       start = now + delay;
     }
+    // Landings already reported ahead of time (update's lookahead) that the
+    // new run shares: a run that keeps the falling flap has the same timing,
+    // so its first landings are those same ones and must not be reported twice.
+    const int ahead = mid_flap ? std::max(0, (int)c.emitted - done) : 0;
     c.from = cur;
     c.steps = (uint16_t)steps;
     c.start = start;
-    c.emitted = 0;
+    c.emitted = (uint16_t)std::min(ahead, steps);
     if (steps) c.dirty = true;
     const double end = start + steps * (double)c.per;
     if (end > finish_ms_) finish_ms_ = (uint32_t)std::ceil(end);
@@ -86,8 +90,8 @@ void Board::jump(const std::vector<uint16_t> &targets) {
   }
 }
 
-void Board::update(uint32_t now_ms, FlipSink *sink) {
-  const double now = now_ms;
+void Board::update(uint32_t now_ms, FlipSink *sink, uint32_t lookahead_ms) {
+  const double now = (double)now_ms + lookahead_ms;
   for (size_t i = 0; i < cells_.size(); i++) {
     Cell &c = cells_[i];
     const int done = completed(c, now);
@@ -111,6 +115,10 @@ CellView Board::view(int i, uint32_t now_ms) const {
 }
 
 bool Board::busy(uint32_t now_ms) const { return now_ms < finish_ms_; }
+
+void Board::markAllDirty() {
+  for (auto &c : cells_) c.dirty = true;
+}
 
 bool Board::takeDirty(int i, uint32_t now_ms) {
   Cell &c = cells_[i];

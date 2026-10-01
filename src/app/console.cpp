@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "config.h"
+#include "content.h"
 #include "net.h"
 #include "note.h"
 #include "sdcard.h"
@@ -244,7 +245,7 @@ int run(const std::string &line) {
     return 0;
   }
   if (c == "msg" && a.size() > 1) {
-    sign::show(line.substr(line.find(' ') + 1));
+    content::showOverride(line.substr(line.find(' ') + 1), 60);
     return 0;
   }
   if (c == "wifi" && a.size() > 1) {

@@ -1,0 +1,74 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clock and weather - FlapBoard</title><link rel="stylesheet" href="/style.css">
+<style>.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:4px 14px}
+.sample{font:14px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;background:var(--panel2);border-radius:8px;padding:8px 10px;margin:6px 0 0;min-height:1.5em}
+.results{display:grid;gap:6px;margin-top:8px}.results button{text-align:left;font-weight:500}
+.hint{font-size:13px;color:var(--dim);margin:6px 0 0}.big{font:600 28px/1.2 ui-monospace,Menlo,monospace;margin:0}</style></head><body>
+<header><div class="in"><b id="name">FlapBoard</b>
+<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/clock" class="on">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<main><div id="note"></div>
+<section class="card"><h2>Clock</h2><p class="big" id="time">--:--</p><p class="hint" id="clockinfo"></p>
+<div class="grid2">
+<div><label for="timezone">Time zone</label><select id="timezone"></select></div>
+<div><label for="ntp_server">Time server</label><input id="ntp_server"></div>
+<div><label for="time_format">{time} looks like</label><input id="time_format"><div class="sample" id="s_time"></div></div>
+<div><label for="date_format">{date} looks like</label><input id="date_format"><div class="sample" id="s_date"></div></div>
+</div><p class="hint">Formats: %-I hour, %H 24-hour, %M minutes, %S seconds, %p AM/PM, %a/%A day, %b/%B month, %-d day of month, %Y year.</p></section>
+
+<section class="card"><h2>Location and weather</h2>
+<label for="q">Find a place</label><div class="row" style="margin-top:0"><input id="q" placeholder="City, town or ZIP code" style="flex:1"><button id="find" class="sec">Search</button></div>
+<div class="results" id="results"></div>
+<div class="grid2">
+<div><label for="weather_place">Place name on the sign</label><input id="weather_place"></div>
+<div><label for="weather_lat">Latitude</label><input id="weather_lat" type="number" step="0.0001"></div>
+<div><label for="weather_lon">Longitude</label><input id="weather_lon" type="number" step="0.0001"></div>
+<div><label for="units">Units</label><select id="units"><option value="imperial">&deg;F and mph</option><option value="metric">&deg;C and km/h</option></select></div>
+<div><label for="weather_minutes">Check every (minutes)</label><input id="weather_minutes" type="number" min="5" max="180"></div>
+</div><p class="hint" id="wx"></p><div class="row"><button class="sec" id="refresh">Check the weather now</button></div>
+<p class="hint">Weather by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. The place search runs from this browser; the sign only keeps the coordinates.</p></section>
+
+<section class="card"><h2>How the clock and weather read</h2>
+<label for="clock_template">Clock message</label><input id="clock_template"><div class="sample" id="s_clock"></div>
+<label for="weather_template">Weather message</label><input id="weather_template"><div class="sample" id="s_weather"></div>
+<p class="hint">| starts a new row. Fields: {time} {date} {temp} {feels} {hi} {lo} {hum} {wind} {cond} {place} {units} {wind_units}. A field can carry its own format: {time:%H:%M}. To show one of these, choose it on the <a href="/messages">Messages</a> page, or use the fields inside any message.</p></section>
+
+<div class="row" style="position:sticky;bottom:0;background:var(--bg);padding:10px 0"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
+const KEYS=['timezone','ntp_server','time_format','date_format','weather_place','weather_lat','weather_lon','units','weather_minutes','clock_template','weather_template'];
+const NUMS=['weather_lat','weather_lon','weather_minutes'];
+let saved={};
+function form(){const c={};KEYS.forEach(k=>c[k]=NUMS.includes(k)?+$('#'+k).value:$('#'+k).value);return c}
+// Samples are expanded by the sign itself, so they show exactly what it would.
+// Unsaved formats are substituted in first.
+async function expand(tpl){const c=form();tpl=tpl.replace(/\{time\}/g,'{time:'+c.time_format+'}').replace(/\{date\}/g,'{date:'+c.date_format+'}');
+  try{return (await (await fetch('/api/content?expand='+encodeURIComponent(tpl))).json()).text}catch(e){return ''}}
+let t=null;function samples(){clearTimeout(t);t=setTimeout(async()=>{const c=form();
+  $('#s_time').textContent=await expand('{time}');$('#s_date').textContent=await expand('{date}');
+  $('#s_clock').textContent=(await expand(c.clock_template)).split('|').join('\n');$('#s_weather').textContent=(await expand(c.weather_template)).split('|').join('\n');
+  $('#dirty').textContent=JSON.stringify(c)!==JSON.stringify(saved)?'Unsaved changes':''},250)}
+async function status(){try{const s=await (await fetch('/api/status')).json();$('#name').textContent=s.device_name;
+  $('#time').textContent=await expand('{time:%-I:%M:%S %p}  {date:%a %b %-d %Y}');
+  $('#clockinfo').textContent='Time '+s.content.clock+', zone '+s.content.timezone+'.';
+  const w=s.weather;$('#wx').textContent=w.ok?`Now: ${Math.round(w.temp)}° ${w.cond}, high ${Math.round(w.hi)}, low ${Math.round(w.lo)} (${w.place||'no name'}, ${Math.round(w.age_s/60)} min ago)`+(w.error?'. Last try: '+w.error:''):(w.error||'No weather yet: set a location and save.')}catch(e){}}
+$('#find').onclick=async()=>{const q=$('#q').value.trim();if(!q)return;$('#results').innerHTML='<span class="dim">Searching...</span>';
+  try{const r=await (await fetch('https://geocoding-api.open-meteo.com/v1/search?count=6&language=en&format=json&name='+encodeURIComponent(q))).json();
+    const list=r.results||[];$('#results').innerHTML=list.length?'':'<span class="dim">Nothing found. Try a nearby city.</span>';
+    for(const p of list){const b=document.createElement('button');b.className='sec';b.textContent=[p.name,p.admin1,p.country].filter(Boolean).join(', ')+(p.timezone?'  ('+p.timezone+')':'');
+      b.onclick=()=>{$('#weather_place').value=p.name.toUpperCase();$('#weather_lat').value=p.latitude.toFixed(4);$('#weather_lon').value=p.longitude.toFixed(4);
+        if(p.timezone&&[...$('#timezone').options].some(o=>o.value===p.timezone))$('#timezone').value=p.timezone;$('#results').innerHTML='';samples();
+        note('ok','Location and time zone filled in. Save to use them.')};$('#results').appendChild(b)}}
+  catch(e){$('#results').innerHTML='<span class="dim">The place search did not answer. You can type the latitude and longitude instead.</span>'}};
+$('#q').addEventListener('keydown',e=>{if(e.key==='Enter')$('#find').click()});
+$('#refresh').onclick=async()=>{await fetch('/api/weather',{method:'POST'});note('ok','Asked for fresh weather; it shows here in a few seconds.');setTimeout(status,5000)};
+$('#save').onclick=async()=>{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form())});const d=await r.json();
+  if(!r.ok){note('err',d.error);return}saved=form();samples();note('ok','Saved.');setTimeout(status,1500)};
+document.querySelectorAll('input,select').forEach(el=>{if(el.id!=='q')el.addEventListener('input',samples)});
+(async()=>{const z=await (await fetch('/api/zones')).text();const sel=$('#timezone');
+  z.trim().split('\n').map(l=>l.split('\t')[0]).forEach(n=>sel.add(new Option(n.replace(/_/g,' '),n)));
+  const c=await (await fetch('/api/config')).json();KEYS.forEach(k=>$('#'+k).value=c[k]);saved=form();samples();status();setInterval(status,5000)})();
+</script></body></html>

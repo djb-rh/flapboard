@@ -7,7 +7,9 @@
 #include <esp_task_wdt.h>
 #include <sys/stat.h>
 
+#include "clock.h"
 #include "config.h"
+#include "content.h"
 #include "console.h"
 #include "library.h"
 #include "net.h"
@@ -16,6 +18,7 @@
 #include "sound.h"
 #include "sdcard.h"
 #include "status.h"
+#include "weather.h"
 #include "web.h"
 
 using namespace flapboard;
@@ -46,10 +49,13 @@ void setup() {
   if (sdcard::begin()) makeLibraryFolders();
   else note("sd: no card (or not FAT32): the file library is unavailable");
 
+  clock::begin();
   sound::begin();
   sign::begin();
+  content::begin();
   net::begin();
   web::begin();
+  weather::begin();
   // ESP-IDF's own logging goes quiet from here: with the Mac attached and
   // nothing reading serial, blocking log writes were suspected of killing
   // Wi-Fi uploads on the T48 build. note() still prints.
@@ -85,6 +91,8 @@ void loop() {
   handleTouch();
   net::loop();
   sound::loop();
+  clock::loop();
+  content::loop();
   status::update();
   console::loop();
   if (web::takeRebootRequest()) {

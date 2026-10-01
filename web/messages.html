@@ -1,0 +1,83 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Messages - FlapBoard</title><link rel="stylesheet" href="/style.css">
+<style>
+textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:8px}
+#editor{min-height:300px}.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 14px}
+.files{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px}.files label{display:flex;gap:6px;align-items:center;margin:0;color:var(--text);font-size:14px}
+.msgs{display:grid;gap:8px;margin-top:12px}.m{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--panel2)}
+.m pre{margin:0;flex:1;min-width:0;font:13px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
+.m small{color:var(--dim);display:block;margin-top:4px}.now{font:15px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;background:var(--panel2);border-radius:8px;padding:10px 12px;margin:0}
+.hint{font-size:13px;color:var(--dim);margin:6px 0 0}
+</style></head><body>
+<header><div class="in"><b id="name">FlapBoard</b>
+<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages" class="on">Messages</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<main><div id="note"></div>
+<section class="card"><h2>On the sign now</h2><pre class="now" id="now">...</pre><p class="hint" id="nowinfo"></p></section>
+
+<section class="card"><h2>What to show</h2><div class="grid2">
+<div><label for="content_source">Show</label><select id="content_source"><option value="messages">Messages from the library</option><option value="clock">The clock</option><option value="weather">The weather</option><option value="text">One fixed message</option></select></div>
+<div><label for="content_order">Order</label><select id="content_order"><option value="random">Random</option><option value="sequential">In file order</option></select></div>
+<div><label for="content_dwell">Seconds per message</label><input id="content_dwell" type="number" min="3" max="3600"></div>
+</div>
+<div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div></div>
+<div id="textbox"><label for="content_text">Fixed message</label><textarea id="content_text" rows="3"></textarea></div>
+<div class="row"><button id="saveprog">Save</button></div>
+<p class="hint">The clock and weather layouts are on the <a href="/clock">Clock &amp; weather</a> page. Phase 6 adds a schedule on top of this.</p></section>
+
+<section class="card"><h2>Show something now</h2>
+<textarea id="quick" rows="3" placeholder="LATE ARRIVAL|TRACK 4"></textarea>
+<div class="row"><label for="secs" style="margin:0">for</label><input id="secs" type="number" min="0" max="86400" value="60" style="width:7em"><span class="dim">seconds (0 = until cleared)</span>
+<button id="send">Show now</button><button id="back" class="sec">Back to the program</button></div></section>
+
+<section class="card"><h2>Library</h2>
+<div class="row" style="margin-top:0"><select id="file" style="max-width:280px"></select><button class="sec" id="newf">New file</button><button class="danger" id="delf">Delete file</button></div>
+<label for="editor">Messages are separated by a blank line. Each line is a row; | alone is an empty row. Options on a first line: @left @right @top @hold 45.
+Fields: {time} {date} {temp} {hi} {lo} {cond} {place} {name} {ip}. Tiles: {R} {O} {Y} {G} {B} {V} {W} {K}.</label>
+<textarea id="editor" spellcheck="false" aria-label="Message file"></textarea>
+<div class="row"><button id="savef">Save file</button><span class="dim" id="fstate"></span></div>
+<div class="msgs" id="msgs"></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>({ok:r.ok,d:await r.json()}));
+// The same rules as src/app/content_parse.cpp.
+function parseFile(text){const out=[];let rows=[],m={align:'centre',hold:0,top:false};
+  const finish=()=>{if(rows.length)out.push(Object.assign({text:rows.join('\n')},m));rows=[];m={align:'centre',hold:0,top:false}};
+  for(let line of text.split('\n')){line=line.replace(/\r$/,'');const t=line.replace(/^[ \t]+/,'');
+    if(!t){finish();continue}if(t[0]==='#')continue;
+    if(t[0]==='@'&&!rows.length){const w=t.split(/\s+/);for(let i=0;i<w.length;i++){if(w[i]==='@left')m.align='left';else if(w[i]==='@right')m.align='right';
+      else if(w[i]==='@center')m.align='centre';else if(w[i]==='@top')m.top=true;else if(w[i]==='@hold')m.hold=parseInt(w[++i])||0}continue}
+    rows.push(t==='|'?'':line)}finish();return out}
+let files=[],cur='',savedText='',cfg={};
+async function listFiles(){const d=await (await fetch('/library/list?path=messages')).json();files=d.entries.filter(e=>!e.dir&&/\.txt$/i.test(e.name)).map(e=>e.name);
+  const sel=$('#file'),keep=cur;sel.innerHTML='';files.forEach(f=>sel.add(new Option(f,f)));if(files.includes(keep))sel.value=keep;
+  $('#files').innerHTML=files.map(f=>'<label><input type="checkbox" value="'+esc(f)+'"'+((cfg.content_files||[]).includes(f)?' checked':'')+'>'+esc(f)+'</label>').join('')||'<span class="dim">No message files yet.</span>'}
+async function openFile(f){cur=f;if(!f){$('#editor').value='';renderMsgs();return}
+  const r=await fetch('/library/download?path='+encodeURIComponent('messages/'+f));savedText=r.ok?await r.text():'';$('#editor').value=savedText;renderMsgs()}
+function renderMsgs(){const ms=parseFile($('#editor').value);$('#fstate').textContent=($('#editor').value!==savedText?'Unsaved changes. ':'')+ms.length+' message'+(ms.length===1?'':'s');
+  $('#msgs').innerHTML=ms.map((m,i)=>'<div class="m"><div style="flex:1;min-width:0"><pre>'+esc(m.text)+'</pre><small>'+m.align+(m.top?', top':'')+(m.hold?', '+m.hold+' s':'')+'</small></div><button class="sec" data-i="'+i+'">Show now</button></div>').join('');
+  $('#msgs').querySelectorAll('button').forEach(b=>b.onclick=async()=>{const m=ms[+b.dataset.i];const r=await post('/api/message',{text:m.text,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)})}
+function srcUi(){const s=$('#content_source').value;$('#filesbox').hidden=s!=='messages';$('#textbox').hidden=s!=='text';$('#content_order').disabled=s!=='messages'}
+async function refreshNow(){try{const s=await (await fetch('/api/content')).json();$('#now').textContent=s.shown||'(blank)';
+  $('#nowinfo').textContent=(s.override?'A message sent from here or MQTT. ':'From the program: '+s.source+(s.file?' ('+s.file+')':'')+'. ')+s.messages+' messages in the library.'}catch(e){}}
+$('#file').onchange=()=>{if($('#editor').value!==savedText&&!window.__confirmLeave){note('err','Save or undo your changes to '+cur+' first (or press Open again).');window.__confirmLeave=true;$('#file').value=cur;return}window.__confirmLeave=false;openFile($('#file').value)};
+$('#editor').oninput=renderMsgs;
+$('#savef').onclick=async()=>{if(!cur){note('err','Make a file first.');return}const r=await post('/api/messages/save',{file:cur,text:$('#editor').value});
+  if(!r.ok){note('err',r.d.error);return}savedText=$('#editor').value;renderMsgs();note('ok','Saved '+r.d.saved+' ('+r.d.messages+' messages).')};
+$('#newf').onclick=async()=>{let i=1,f;do f='new-'+(i++)+'.txt';while(files.includes(f));
+  const r=await post('/api/messages/save',{file:f,text:'NEW MESSAGE\n'});if(!r.ok){note('err',r.d.error);return}await listFiles();$('#file').value=f;openFile(f);note('ok','Made '+f+'. Rename it in Files if you like.')};
+let delArmed=false;$('#delf').onclick=async()=>{if(!cur)return;if(!delArmed){delArmed=true;$('#delf').textContent='Really delete '+cur+'?';setTimeout(()=>{delArmed=false;$('#delf').textContent='Delete file'},4000);return}
+  delArmed=false;$('#delf').textContent='Delete file';const r=await post('/library/delete',{path:'messages/'+cur});if(!r.ok){note('err',r.d.error);return}note('ok','Deleted '+cur+'.');cur='';await listFiles();openFile(files[0]||'')};
+$('#content_source').onchange=srcUi;
+$('#saveprog').onclick=async()=>{const body={content_source:$('#content_source').value,content_order:$('#content_order').value,content_dwell:+$('#content_dwell').value,
+  content_text:$('#content_text').value,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
+  const r=await post('/api/config',body);if(!r.ok){note('err',r.d.error);return}cfg=r.d;note('ok','Saved. The sign switches over within a second.')};
+$('#send').onclick=async()=>{const r=await post('/api/message',{text:$('#quick').value,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)};
+$('#back').onclick=async()=>{await post('/api/message',{clear:true});note('ok','Back to the program.')};
+(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text'].forEach(k=>$('#'+k).value=cfg[k]);srcUi();
+  await listFiles();await openFile(files[0]||'');refreshNow();setInterval(refreshNow,3000);
+  fetch('/api/status').then(r=>r.json()).then(s=>$('#name').textContent=s.device_name)})();
+</script></body></html>

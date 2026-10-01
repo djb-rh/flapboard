@@ -11,7 +11,10 @@
 #include <string>
 #include <vector>
 
+#include "clock.h"
 #include "config.h"
+#include "content.h"
+#include "generated/zones.h"
 #include "generated/fonts.h"
 #include "generated/web_assets.h"
 #include "library.h"
@@ -21,6 +24,7 @@
 #include "sign.h"
 #include "sound.h"
 #include "status.h"
+#include "weather.h"
 
 namespace flapboard {
 namespace web {
@@ -236,16 +240,70 @@ esp_err_t handleConfigPost(httpd_req_t *req) {
   return sendJson(req, 200, config::toJson());
 }
 
-// Show a message now (a test hook until Phase 5's content engine; MQTT uses
-// the same path in Phase 7). Body: {"text": "..."}.
+// Show a message now, over whatever the program is showing: {"text": "...",
+// "seconds": 60}. seconds 0 = until cleared; {"clear": true} returns to the program.
 esp_err_t handleMessage(httpd_req_t *req) {
   std::string body;
   if (!readBody(req, &body, 2048)) return sendError(req, 400, "request too large");
   JsonDocument d;
-  if (deserializeJson(d, body) || !d["text"].is<const char *>()) return sendError(req, 400, "expected {\"text\": \"...\"}");
-  sign::show(d["text"].as<std::string>());
+  if (deserializeJson(d, body)) return sendError(req, 400, "invalid JSON");
+  if (d["clear"] | false) {
+    content::clearOverride();
+    return sendJson(req, 200, "{\"cleared\":true}");
+  }
+  if (!d["text"].is<const char *>()) return sendError(req, 400, "expected {\"text\": \"...\"}");
+  content::showOverride(d["text"].as<std::string>(), d["seconds"] | 60);
   return sendJson(req, 200, "{\"shown\":true}");
 }
+
+// Program state, and {fields} expanded as the sign would now: ?expand=...
+esp_err_t handleContent(httpd_req_t *req) {
+  const std::string tpl = query(req, "expand");
+  if (!tpl.empty()) return sendJson(req, 200, "{\"text\":" + library::jsonStr(content::expand(tpl)) + "}");
+  return sendJson(req, 200, content::statusJson());
+}
+
+// Overwrite one message file (the library editor). {"file": "x.txt", "text": "..."}
+esp_err_t handleMessageSave(httpd_req_t *req) {
+  std::string body;
+  if (!readBody(req, &body, 64 * 1024)) return sendError(req, 400, "the file is too large (64 KB at most)");
+  JsonDocument d;
+  if (deserializeJson(d, body)) return sendError(req, 400, "invalid JSON");
+  std::string name = d["file"] | "";
+  if (name.size() < 5 || strcasecmp(name.c_str() + name.size() - 4, ".txt") != 0) name += ".txt";
+  if (library::validateName(name) != library::Err::Ok) return sendError(req, 400, "not a usable file name");
+  std::string abs;
+  if (library::resolve("messages/" + name, &abs) != library::Err::Ok) return sendError(req, 400, "path not allowed");
+  const std::string tmp = abs.substr(0, abs.rfind('/') + 1) + ".save.part";
+  FILE *f = fopen(tmp.c_str(), "wb");
+  if (!f) return sendError(req, 500, "cannot write to the SD card");
+  const std::string text = d["text"] | "";
+  const bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+  fclose(f);
+  if (!ok) {
+    remove(tmp.c_str());
+    return sendError(req, 507, "the SD card is full");
+  }
+  remove(abs.c_str());
+  if (rename(tmp.c_str(), abs.c_str()) != 0) return sendError(req, 500, "could not replace the file");
+  content::libraryChanged();
+  const auto msgs = content::parseFile(name, text);
+  return sendJson(req, 200, "{\"saved\":" + library::jsonStr("messages/" + name) + ",\"messages\":" + std::to_string(msgs.size()) + "}");
+}
+
+esp_err_t handleZones(httpd_req_t *req) {
+  httpd_resp_set_type(req, "text/plain; charset=utf-8");
+  httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
+  return httpd_resp_sendstr(req, zones::kZones);
+}
+
+esp_err_t handleWeather(httpd_req_t *req) {
+  if (req->method == HTTP_POST) weather::refreshNow();
+  return sendJson(req, 200, weather::statusJson());
+}
+
+esp_err_t handleMessagesPage(httpd_req_t *req) { return sendAsset(req, "/messages.html"); }
+esp_err_t handleClockPage(httpd_req_t *req) { return sendAsset(req, "/clock.html"); }
 
 // Volume: {"volume": 0-100} and/or {"enabled": bool}; applied at once.
 esp_err_t handleVolume(httpd_req_t *req) {
@@ -471,6 +529,7 @@ esp_err_t handleLibUpload(httpd_req_t *req) {
   for (auto &s : sink.saved) {
     note("upload: %s", s.c_str());
     if (s.rfind("sounds/", 0) == 0) sound::reloadClips();   // a new clack takes effect at once
+    if (s.rfind("messages/", 0) == 0) content::libraryChanged();
   }
   return sendJson(req, 200, j + "]}");
 }
@@ -492,6 +551,7 @@ esp_err_t handleLibOp(httpd_req_t *req) {
   } else if (uri.rfind("/library/delete", 0) == 0) {
     e = library::remove(path);
     if (e == library::Err::Ok && library::normalise(path).rfind("sounds", 0) == 0) sound::reloadClips();
+    if (e == library::Err::Ok && library::normalise(path).rfind("messages", 0) == 0) content::libraryChanged();
     reply = "{\"deleted\":" + library::jsonStr(path) + "}";
   } else {
     e = library::rename(path, name, &out);
@@ -507,7 +567,7 @@ void begin() {
   g_buf = (char *)heap_caps_malloc(kChunk, MALLOC_CAP_SPIRAM);
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.stack_size = 10240;
-  cfg.max_uri_handlers = 40;
+  cfg.max_uri_handlers = 56;
   cfg.uri_match_fn = httpd_uri_match_wildcard;   // for /fonts/*
   cfg.lru_purge_enable = true;
   cfg.recv_wait_timeout = 20;
@@ -533,6 +593,13 @@ void begin() {
       {"/api/config", HTTP_POST, handleConfigPost},
       {"/api/log", HTTP_GET, handleLog},
       {"/api/message", HTTP_POST, handleMessage},
+      {"/api/content", HTTP_GET, handleContent},
+      {"/api/messages/save", HTTP_POST, handleMessageSave},
+      {"/api/zones", HTTP_GET, handleZones},
+      {"/api/weather", HTTP_GET, handleWeather},
+      {"/api/weather", HTTP_POST, handleWeather},
+      {"/messages", HTTP_GET, handleMessagesPage},
+      {"/clock", HTTP_GET, handleClockPage},
       {"/api/volume", HTTP_POST, handleVolume},
       {"/api/reboot", HTTP_POST, handleReboot},
       {"/api/c6update", HTTP_POST, handleCoprocUpdate},

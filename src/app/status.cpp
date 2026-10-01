@@ -8,6 +8,8 @@
 #include <freertos/semphr.h>
 
 #include "config.h"
+#include "content.h"
+#include "weather.h"
 #include "net.h"
 #include "sdcard.h"
 #include "sign.h"
@@ -101,6 +103,11 @@ std::string json() {
   d["sound"] = sd2;
   d["sound"]["volume"] = sound::volume();
   d["sound"]["enabled"] = sound::enabled();
+  JsonDocument ct, wx;
+  deserializeJson(ct, content::statusJson());
+  deserializeJson(wx, weather::statusJson());
+  d["content"] = ct;
+  d["weather"] = wx;
   std::string out;
   serializeJson(d, out);
   return out;

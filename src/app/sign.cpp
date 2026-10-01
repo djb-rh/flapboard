@@ -377,6 +377,7 @@ void bench(Renderer &ren, PanelSurface &surf, const GlyphSet &g, const LayoutRes
 }
 std::string g_pending;
 bool g_has_pending = false;
+MessageOptions g_pending_opt;
 
 // Frame statistics, reported every 2 s while the board moves.
 struct Stats {
@@ -384,13 +385,6 @@ struct Stats {
   uint64_t draw_us = 0, max_us = 0, blit_us = 0, sync_us = 0;
 } g_stats, g_last;
 
-// Until Phase 5 brings real content: a few messages on a timer.
-const char *const kDemo[] = {
-    "WELCOME ABOARD|THE FLAPBOARD EXPRESS",
-    "{R}{O}{Y}{G}{B}{V}{R}{O}{Y}{G}{B}{V}{R}{O}{Y}{G}{B}{V}{R}{O}{Y}{G}||DINING CAR OPEN|UNTIL 9:30 PM||{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}{G}",
-    "NOW 72° SUNNY|HI 81  LO 64",
-    "NEXT STOP|GRAND CENTRAL TERMINAL",
-};
 
 // Everything the board is drawn from, rebuilt when the layout settings change.
 struct SignState {
@@ -406,6 +400,7 @@ struct SignState {
   Board board;
   PanelSurface surf;
   std::string message = "";
+  MessageOptions opt;
   bool fits = true;
   size_t glyph_bytes = 0;
 };
@@ -457,7 +452,7 @@ void rebuild(SignState &st, const Settings &s) {
   st.ren.setup(st.lay, &st.glyphs, st.theme);
   st.board.resize(s.rows, s.cols, (int)st.drum.size());
   st.board.setMotion(s.motion);
-  st.board.jump(layoutMessage(st.drum, st.message, s.rows, s.cols));   // the current message, re-flowed
+  st.board.jump(layoutMessage(st.drum, st.message, s.rows, s.cols, st.opt));   // the current message, re-flowed
   redrawAll(st);
   note("sign: %dx%d cells of %dx%d px, %s, theme %s, glyphs %u KB, rebuilt in %lu ms%s", s.rows, s.cols,
        st.lay.cell_w, st.lay.cell_h, g_font_used.c_str(), s.theme.c_str(), (unsigned)(st.glyph_bytes / 1024),
@@ -469,8 +464,6 @@ void renderTask(void *) {
   g_sign = &st;
   rebuild(st, readSettings());
 
-  size_t demo = 0;
-  uint32_t next_demo = millis() + 1500;
   uint32_t last_report = millis(), last_settings = millis();
   for (;;) {
     const uint32_t now = millis();
@@ -486,22 +479,20 @@ void renderTask(void *) {
       }
     }
     std::string msg;
+    MessageOptions opt;
     bool have = false;
     xSemaphoreTake(g_mux, portMAX_DELAY);
     if (g_has_pending) {
       msg = g_pending;
+      opt = g_pending_opt;
       have = true;
       g_has_pending = false;
     }
     xSemaphoreGive(g_mux);
-    if (!have && now >= next_demo && !st.board.busy(now)) {
-      msg = kDemo[demo++ % (sizeof(kDemo) / sizeof(kDemo[0]))];
-      have = true;
-    }
     if (have) {
       st.message = msg;
-      st.board.show(layoutMessage(st.drum, msg, st.set.rows, st.set.cols), now);
-      next_demo = st.board.finishMs() + 8000;
+      st.opt = opt;
+      st.board.show(layoutMessage(st.drum, msg, st.set.rows, st.set.cols, opt), now);
     }
     if (g_bench) {
       g_bench = false;
@@ -564,9 +555,12 @@ void begin() {
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
-void show(const std::string &text) {
+void show(const std::string &text, int align, bool vertical_center) {
   xSemaphoreTake(g_mux, portMAX_DELAY);
   g_pending = text;
+  g_pending_opt = MessageOptions();
+  g_pending_opt.align = align == 0 ? Align::Left : align == 2 ? Align::Right : Align::Center;
+  g_pending_opt.vertical_center = vertical_center;
   g_has_pending = true;
   xSemaphoreGive(g_mux);
 }

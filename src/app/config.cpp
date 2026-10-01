@@ -42,7 +42,23 @@ constexpr const char *kDefaults = R"JSON({
   "orientation": "landscape",
   "flip_ms": 70,
   "speed_variance": 3,
-  "start_mode": "random"
+  "start_mode": "random",
+  "content_source": "messages",
+  "content_files": [],
+  "content_order": "random",
+  "content_dwell": 20,
+  "content_text": "",
+  "clock_template": "{time}|{date}",
+  "weather_template": "{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}",
+  "time_format": "%-I:%M %p",
+  "date_format": "%a %b %-d",
+  "timezone": "America/New_York",
+  "ntp_server": "pool.ntp.org",
+  "weather_lat": 0.0,
+  "weather_lon": 0.0,
+  "weather_place": "",
+  "units": "imperial",
+  "weather_minutes": 15
 })JSON";
 
 JsonDocument g_doc;

@@ -10,6 +10,7 @@
 #include "flapcore/message.h"
 #include "flapcore/render.h"
 #include "flapcore/theme.h"
+#include "flapcore/template.h"
 
 using namespace flapcore;
 
@@ -371,6 +372,33 @@ void test_theme_custom_colours() {
   TEST_ASSERT_EQUAL_HEX16(rgb565(0xFF, 0xFF, 0xFF), t.glyph);
 }
 
+void test_format_time() {
+  struct tm t = {};
+  t.tm_year = 126; t.tm_mon = 8; t.tm_mday = 3; t.tm_hour = 7; t.tm_min = 5; t.tm_sec = 9; t.tm_wday = 4; t.tm_yday = 245;
+  TEST_ASSERT_EQUAL_STRING("7:05 AM", formatTime("%-I:%M %p", t).c_str());
+  TEST_ASSERT_EQUAL_STRING("07:05:09", formatTime("%H:%M:%S", t).c_str());
+  TEST_ASSERT_EQUAL_STRING("Thu Sep 3", formatTime("%a %b %-d", t).c_str());
+  TEST_ASSERT_EQUAL_STRING("Thursday, September 03 2026", formatTime("%A, %B %d %Y", t).c_str());
+  TEST_ASSERT_EQUAL_STRING("09/03/26 100%", formatTime("%m/%d/%y 100%%", t).c_str());
+  t.tm_hour = 0;
+  TEST_ASSERT_EQUAL_STRING("12 am", formatTime("%-I %P", t).c_str());
+  t.tm_hour = 12;
+  TEST_ASSERT_EQUAL_STRING("12 PM", formatTime("%-I %p", t).c_str());
+  TEST_ASSERT_EQUAL_STRING("%Q", formatTime("%Q", t).c_str());
+}
+
+void test_expand_template() {
+  auto lookup = [](const std::string &n, const std::string &a, std::string *o) {
+    if (n == "temp") { *o = "72"; return true; }
+    if (n == "time") { *o = a.empty() ? "7:05" : "[" + a + "]"; return true; }
+    return false;
+  };
+  TEST_ASSERT_EQUAL_STRING("NOW 72\xC2\xB0|7:05", expandTemplate("NOW {temp}\xC2\xB0|{time}", lookup).c_str());
+  TEST_ASSERT_EQUAL_STRING("[%H:%M]", expandTemplate("{time:%H:%M}", lookup).c_str());
+  TEST_ASSERT_EQUAL_STRING("{R}{G} {nope} {x", expandTemplate("{R}{G} {nope} {x", lookup).c_str());
+  TEST_ASSERT_EQUAL_STRING("{temp", expandTemplate("{temp", lookup).c_str());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_drum_order);
@@ -387,5 +415,7 @@ int main() {
   RUN_TEST(test_mixer_places_clacks_on_their_sample);
   RUN_TEST(test_mixer_steals_and_never_clips);
   RUN_TEST(test_theme_custom_colours);
+  RUN_TEST(test_format_time);
+  RUN_TEST(test_expand_template);
   return UNITY_END();
 }

@@ -67,6 +67,7 @@ std::string json() {
   w["ip"] = net::ip();
   w["rssi"] = net::rssi();
   w["mac"] = WiFi.macAddress();
+  w["access_point"] = net::bssid();
   w["ipv6_link_local"] = WiFi.linkLocalIPv6().toString();
   w["portal"] = net::portalActive();
   w["portal_ssid"] = net::portalSsid();

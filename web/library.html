@@ -65,7 +65,8 @@ $('#up').onclick=()=>$('#picker').click();
 
 // Safari will not serialise a File taken straight from a file input into an
 // XHR multipart body (it sends no data), so each file is read into an
-// ArrayBuffer and re-wrapped as a Blob first (found on the Pi frame).
+// ArrayBuffer and re-wrapped as a Blob first (found on the Pi frame). The
+// upload itself goes in 16 KB pieces (putInPieces).
 function readFile(f){return new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.onerror=()=>rej(new Error('unreadable'));fr.readAsArrayBuffer(f)})}
 // Photos: decode in the browser (Safari also reads HEIC), scale so the
 // picture still covers 1280x720, and send a baseline JPEG plus a 240x135
@@ -84,7 +85,21 @@ async function shrinkPhoto(f){
     const thumb=await new Promise(r=>t.toBlob(r,'image/jpeg',0.8));
     return {main,thumb,name:f.name.replace(/\.[^.]+$/,'')+'.jpg'}}
   catch(e){return null}finally{URL.revokeObjectURL(url)}}
-function sendOne(f,buf,onProgress,thumb){return new Promise(resolve=>{
+// Sends a file to the sign in 16 KB pieces (/library/upload_part). The
+// Tab5's Wi-Fi chip wedges on large inbound bursts; a request never bursts
+// more than its own body. Each piece is retried; onProgress(0..1).
+async function putInPieces(folder,name,blob,onProgress,thumb){
+  const id=Math.random().toString(36).slice(2,12),total=blob.size,piece=16384;let off=0,last=null;
+  do{const body=blob.slice(off,off+piece);let ok=false;
+    for(let a=0;a<4&&!ok;a++){if(a)await new Promise(r=>setTimeout(r,1500*a));
+      try{const q=new URLSearchParams({path:folder,name,id,offset:off,total});if(thumb)q.set('thumb','1');
+        const r=await fetch('/library/upload_part?'+q,{method:'POST',body});last=await r.json();
+        if(r.ok)ok=true;else if(r.status<500&&r.status!==409)return{ok:false,data:last,status:r.status}}catch(e){last={error:'connection lost'}}}
+    if(!ok)return{ok:false,data:last||{error:'connection lost'},status:0};
+    off+=body.size;if(onProgress)onProgress(total?off/total:1)}while(off<total);
+  return{ok:true,data:last,status:200}}
+function sendOne(f,buf,onProgress,thumb){return putInPieces(cwd,f.name,new Blob([buf],{type:f.type||'application/octet-stream'}),onProgress,thumb)}
+function sendOneMultipart(f,buf,onProgress,thumb){return new Promise(resolve=>{
   const fd=new FormData();fd.append('path',cwd);if(thumb)fd.append('thumb','1');fd.append('file',new Blob([buf],{type:f.type||'application/octet-stream'}),f.name);
   const x=new XMLHttpRequest();x.open('POST','/library/upload');x.timeout=120000;
   x.upload.onprogress=e=>{if(e.lengthComputable)onProgress(e.loaded/e.total)};
@@ -109,11 +124,7 @@ $('#picker').onchange=async function(){
         if(sp){up={name:sp.name,type:'image/jpeg'};buf=await sp.main.arrayBuffer();thumb=sp.thumb}}
       if(!buf)buf=await readFile(f);
       txt.textContent='Uploading '+(i+1)+' of '+files.length+': '+up.name;
-      for(let attempt=0;attempt<3;attempt++){
-        if(attempt){txt.textContent='Retrying '+up.name+' ('+(attempt+1)+' of 3)...';await sleep(3000*attempt)}
-        res=await sendOne(up,buf,fr=>bar.style.width=((base+fr/files.length)*100)+'%');
-        if(res.ok||res.status>=400)break;   // only a lost connection is worth retrying
-      }
+      res=await sendOne(up,buf,fr=>bar.style.width=((base+fr/files.length)*100)+'%');   // pieces retry themselves
       if(res.ok&&thumb&&res.data.saved&&res.data.saved[0]){   // its thumbnail, under the name it was saved as
         const saved=res.data.saved[0].split('/').pop();await sendOne({name:saved,type:'image/jpeg'},await thumb.arrayBuffer(),()=>{},true)}
     }catch(e){res={ok:false,data:{error:'unreadable'},status:0}}

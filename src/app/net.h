@@ -33,7 +33,10 @@ struct Net {
   std::string ssid;
   int rssi;
   bool open;
+  uint8_t bssid[6];
+  int channel;
 };
+std::string bssid();   // the access point joined ("" when not connected)
 // For the web setup page (runs on the server task): the scan and the join
 // are handed to the main loop.
 std::vector<Net> lastScan();
@@ -55,6 +58,9 @@ Watch watch();
 
 // The web server reports activity so the watchdog never restarts mid-upload.
 void markBusy();
+// An upload is (or was, within 3 s) coming in: the speaker stays off.
+void markUploading();
+bool uploading();
 
 }  // namespace net
 }  // namespace flapboard

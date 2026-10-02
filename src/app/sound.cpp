@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <dirent.h>
+#include <driver/gpio.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 
@@ -18,6 +19,7 @@
 #include "config.h"
 #include "generated/sounds.h"
 #include "note.h"
+#include "net.h"
 #include "sdcard.h"
 
 namespace flapboard {
@@ -35,6 +37,19 @@ flapcore::ClackMixer g_mix;
 volatile int g_volume = 60;
 volatile bool g_enabled = true;
 volatile bool g_suppressed = false;
+// The speaker runs only while there is sound to play. A running speaker (I2S
+// clock, codec, amplifier) wedged the ESP32-C6's SDIO Wi-Fi link under
+// upload traffic: measured 1/6 uploads with the speaker merely started,
+// 6/6 with it stopped. The main loop starts and stops it (codec setup is
+// I2C); the audio task only feeds it while g_spk_on.
+volatile bool g_spk_on = false;
+volatile uint32_t g_wanted_ms = 0;     // last time sound was wanted (wake, clacks, voices)
+volatile bool g_feeding = false;       // the audio task has blocks queued
+// Held while feeding (audio task) and while starting/ending (main loop):
+// M5's playRaw() restarts an ended speaker by itself ("lazy begin"), so a
+// feed racing an end() left the speaker running forever after the first
+// board change -- and the Wi-Fi link failing every upload.
+SemaphoreHandle_t g_spk_mux = nullptr;
 volatile uint32_t g_save_at = 0;   // when to write the changed level to the settings
 volatile bool g_reload = false;
 std::vector<int16_t *> g_owned;   // clips loaded from the card (PSRAM)
@@ -181,10 +196,13 @@ void audioTask(void *) {
       last_cfg = millis();
     }
     enabled = g_enabled && !g_suppressed;
-    if (!enabled) {
+    if (!enabled || !g_spk_on) {
+      // Speaker off (or sound off): keep the clock aligned and let events
+      // past their time drain, so a speaker start never plays stale clacks.
       next_ms = millis() + 2 * block_ms;
-      g_mix.render(buf[0], kBlock, next_ms - 1000);   // drain events silently
-      vTaskDelay(pdMS_TO_TICKS(20));
+      g_mix.render(buf[0], kBlock, next_ms - 1000);
+      g_feeding = false;
+      vTaskDelay(pdMS_TO_TICKS(5));
       continue;
     }
     // The speaker queue ran dry (or this task stalled): re-anchor the clock
@@ -194,7 +212,12 @@ void audioTask(void *) {
       if (next_ms < now) g_underruns++;
       next_ms = now + block_ms;
     }
-    while (M5.Speaker.isPlaying(kChannel) < 2) {
+    if (xSemaphoreTake(g_spk_mux, pdMS_TO_TICKS(5)) != pdTRUE) {
+      vTaskDelay(1);
+      continue;
+    }
+    while (g_spk_on && M5.Speaker.isPlaying(kChannel) < 2) {
+      g_feeding = true;
       g_mix.render(buf[which], kBlock, next_ms);
       if (g_cap && g_cap_fill < g_cap_len) {
         const uint32_t take = std::min<uint32_t>(kBlock, g_cap_len - g_cap_fill);
@@ -206,6 +229,7 @@ void audioTask(void *) {
       which = (which + 1) % kBufs;
       next_ms += block_ms;
     }
+    xSemaphoreGive(g_spk_mux);
     if (millis() - last_stats >= 2000) {
       const auto s = g_mix.takeStats();
       if (s.started) note("sound: %lu clacks, peak %d voices, %lu stolen, %lu late-dropped, %lu underruns",
@@ -224,9 +248,8 @@ void audioTask(void *) {
 
 void begin() {
   g_mux = xSemaphoreCreateMutex();
-  M5.Speaker.begin();
-  M5.Speaker.setAllChannelVolume(255);
-  M5.Speaker.setVolume(200);   // the mixer sets the level; this stays fixed
+  g_spk_mux = xSemaphoreCreateMutex();
+  // The speaker is NOT started here: see loop().
   g_mix.setup(kRate, 64);   // a full-board change overlaps ~90 clacks of 90 ms; tails beyond 64 are inaudible
   loadClips();
   // Core 0 (the render task has core 1); above the Arduino loop so a busy
@@ -235,8 +258,44 @@ void begin() {
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
-void flip(uint32_t at_ms) { g_mix.push(at_ms); }
-void loop() { saveIfDue(); }
+void flip(uint32_t at_ms) {
+  g_mix.push(at_ms);
+  g_wanted_ms = millis();
+}
+void wake() { g_wanted_ms = millis(); }
+
+void loop() {
+  saveIfDue();
+  // Start the speaker when sound is wanted, stop it 2 s after the last clack,
+  // and never run it during an upload (net::busy: the link wedges otherwise).
+  const bool uploading = net::uploading();
+  const bool want = g_enabled && !g_suppressed && !uploading && millis() - g_wanted_ms < 2000;
+  if (want && !g_spk_on) {
+    xSemaphoreTake(g_spk_mux, portMAX_DELAY);
+    M5.Speaker.begin();
+    M5.Speaker.setAllChannelVolume(255);
+    M5.Speaker.setVolume(200);   // the mixer sets the level; this stays fixed
+    g_spk_on = true;
+    xSemaphoreGive(g_spk_mux);
+  } else if (!want && g_spk_on) {
+    xSemaphoreTake(g_spk_mux, portMAX_DELAY);   // the audio task is between feeds: no playRaw can follow
+    g_spk_on = false;
+    g_feeding = false;
+    M5.Speaker.stop();
+    const auto c = M5.Speaker.config();
+    M5.Speaker.end();
+    // Deleting the I2S channel leaves its pins routed to the I2S signals;
+    // put them back to plain inputs so no clock keeps running on the board.
+    for (int pin : {(int)c.pin_mck, (int)c.pin_bck, (int)c.pin_ws, (int)c.pin_data_out})
+      if (pin >= 0) gpio_reset_pin((gpio_num_t)pin);
+    static bool told = false;
+    if (!told) {
+      told = true;
+      note("sound: speaker pins mck %d bck %d ws %d out %d", c.pin_mck, c.pin_bck, c.pin_ws, c.pin_data_out);
+    }
+    xSemaphoreGive(g_spk_mux);
+  }
+}
 
 void setVolume(int volume, bool preview) {
   g_volume = volume < 0 ? 0 : volume > 100 ? 100 : volume;
@@ -244,7 +303,8 @@ void setVolume(int volume, bool preview) {
   g_mix.setVolume(g_volume / 100.0f);
   g_save_at = millis() + 2000;   // one write after the last tap, not one per tap
   if (preview && g_enabled) {
-    const uint32_t t = millis() + 40;
+    g_wanted_ms = millis();
+    const uint32_t t = millis() + 120;   // room for the speaker to start
     for (int i = 0; i < 5; i++) g_mix.push(t + i * 70);   // a short run, like one cell turning
   }
 }

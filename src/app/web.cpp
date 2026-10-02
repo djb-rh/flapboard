@@ -5,6 +5,7 @@
 #include <esp_heap_caps.h>
 #include <esp_http_server.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -592,6 +593,7 @@ struct UploadSink : MultipartParser::Handler {
 };
 
 esp_err_t handleLibUpload(httpd_req_t *req) {
+  net::markUploading();   // the speaker stops: a running speaker wedges the Wi-Fi link under uploads
   char ct[160] = "";
   httpd_req_get_hdr_value_str(req, "Content-Type", ct, sizeof(ct));
   if (req->content_len == 0) return sendError(req, 400, "no file data was received -- please try the upload again");
@@ -612,6 +614,7 @@ esp_err_t handleLibUpload(httpd_req_t *req) {
     }
     timeouts = 0;
     net::markBusy();
+    net::markUploading();
     left -= n;
     if (!p.feed((const uint8_t *)g_buf, n)) {
       sink.abort();
@@ -630,6 +633,78 @@ esp_err_t handleLibUpload(httpd_req_t *req) {
     if (s.rfind("messages/", 0) == 0 || s.rfind("photos/", 0) == 0) content::libraryChanged();
   }
   return sendJson(req, 200, j + "]}");
+}
+
+// Uploads in pieces: POST /library/upload_part?path=<folder>&name=<file>
+// &id=<upload id>&offset=<n>&total=<size>[&thumb=1], the body being that
+// piece (<= 64 KB). The ESP32-C6's SDIO Wi-Fi link wedges on large inbound
+// bursts (esp-hosted-mcu#184 class: 60 KB uploads went through, 288 KB ones
+// killed the link); a request can never burst more than its own body, so the
+// web page sends 32 KB pieces. The last piece moves the file into place.
+esp_err_t handleLibUploadPart(httpd_req_t *req) {
+  net::markUploading();
+  const std::string rel = library::normalise(query(req, "path")), name0 = query(req, "name"), id = query(req, "id");
+  const long offset = atol(query(req, "offset").c_str()), total = atol(query(req, "total").c_str());
+  const bool thumb = query(req, "thumb") == "1";
+  std::string dir, name;
+  if (library::resolve(rel, &dir) != library::Err::Ok || library::safeFileName(name0, &name) != library::Err::Ok)
+    return sendError(req, 400, "path or name not allowed");
+  for (char c : id)
+    if (!isalnum((unsigned char)c)) return sendError(req, 400, "bad upload id");
+  if (id.empty() || req->content_len > 65536 || offset < 0 || total < offset + (long)req->content_len)
+    return sendError(req, 400, "bad piece");
+  struct stat st;
+  if (stat(dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) return sendError(req, 404, "destination folder does not exist");
+  if (thumb) {
+    dir += "/.thumbs";
+    mkdir(dir.c_str(), 0777);
+  }
+  const std::string tmp = dir + "/.part-" + id;
+  if (offset == 0) remove(tmp.c_str());
+  else if (stat(tmp.c_str(), &st) != 0 || st.st_size != offset)
+    return sendError(req, 409, "pieces arrived out of order; start the upload again");
+  FILE *f = fopen(tmp.c_str(), offset == 0 ? "wb" : "ab");
+  if (!f) return sendError(req, 500, "cannot write to the SD card");
+  size_t left = req->content_len;
+  int timeouts = 0;
+  while (left > 0) {
+    const int n = httpd_req_recv(req, g_buf, left < kChunk ? left : kChunk);
+    if (n == HTTPD_SOCK_ERR_TIMEOUT && ++timeouts < 3) continue;
+    if (n <= 0 || fwrite(g_buf, 1, n, f) != (size_t)n) {
+      fclose(f);
+      // Truncate back to where this piece started, so a retry of it fits.
+      if (FILE *t = fopen(tmp.c_str(), "r+b")) {
+        ftruncate(fileno(t), offset);
+        fclose(t);
+      }
+      return n <= 0 ? ESP_FAIL : sendError(req, 507, errno == ENOSPC ? "the SD card is full" : "writing failed");
+    }
+    left -= n;
+    timeouts = 0;
+    net::markBusy();
+  }
+  fclose(f);
+  const long have = offset + (long)req->content_len;
+  if (have < total) return sendJson(req, 200, "{\"received\":" + std::to_string(have) + "}");
+  std::string final_abs;
+  if (thumb) {
+    final_abs = dir + "/" + name;
+    remove(final_abs.c_str());
+  } else if (library::uniqueDestination(dir, name, &final_abs) != library::Err::Ok) {
+    remove(tmp.c_str());
+    return sendError(req, 409, "too many files with that name");
+  }
+  if (rename(tmp.c_str(), final_abs.c_str()) != 0) {
+    remove(tmp.c_str());
+    return sendError(req, 500, "could not move the upload into place");
+  }
+  const std::string saved = library::relativeOf(final_abs);
+  if (!thumb) {
+    note("upload: %s", saved.c_str());
+    if (saved.rfind("sounds/", 0) == 0) sound::reloadClips();
+    if (saved.rfind("messages/", 0) == 0 || saved.rfind("photos/", 0) == 0) content::libraryChanged();
+  }
+  return sendJson(req, 200, "{\"saved\":[" + library::jsonStr(saved) + "],\"skipped\":[]}");
 }
 
 esp_err_t handleLibOp(httpd_req_t *req) {
@@ -725,6 +800,7 @@ void begin() {
       {"/library/download", HTTP_GET, handleLibDownload},
       {"/library/thumb", HTTP_GET, handleLibThumb},
       {"/library/upload", HTTP_POST, handleLibUpload},
+      {"/library/upload_part", HTTP_POST, handleLibUploadPart},
       {"/library/mkdir", HTTP_POST, handleLibOp},
       {"/library/delete", HTTP_POST, handleLibOp},
       {"/library/rename", HTTP_POST, handleLibOp},

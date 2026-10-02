@@ -1107,6 +1107,7 @@ void begin() {
 }
 
 void show(const std::string &text, int align, bool vertical_center) {
+  sound::wake();   // start the speaker before the first flap lands
   xSemaphoreTake(g_mux, portMAX_DELAY);
   g_pending = text;
   g_pending_opt = MessageOptions();

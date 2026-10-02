@@ -160,22 +160,18 @@ void task(void *) {
     last_metric = metric;
     std::string err;
     g_internal_low = 0;
-    // HTTPS first. A TLS handshake needs ~40 KB of internal RAM, which is not
-    // there with the camera and Wi-Fi both running; the weather is public and
-    // harmless, so it then comes over plain HTTP rather than not at all.
-    bool ok = fetch(lat, lon, metric, place, true, &err);
-    bool plain = false;
-    if (!ok && err.find("HTTP_CONNECT") != std::string::npos) {
-      std::string err2;
-      ok = fetch(lat, lon, metric, place, false, &err2);
-      plain = ok;
-      if (!ok) err = err2;
-    }
+    // Plain HTTP, deliberately. A TLS handshake here takes ~40 KB of internal
+    // RAM (mbedTLS allocates internally in this prebuilt framework) and
+    // fragments it; afterwards the Wi-Fi chip's receive buffers no longer fit
+    // and uploads wedged the link (measured: 288 KB upload failing with
+    // HTTPS weather on, 0.5 s with it off). The weather is public data.
+    const bool ok = fetch(lat, lon, metric, place, false, &err);
+    const bool plain = true;
     g_plain = plain;
     if (ok) {
       g_error.clear();
       note("weather: %s %.0f%s, %s (%s, internal RAM low point %u KB)", place.c_str(), g_now.temp, metric ? "C" : "F",
-           describe(g_now.code, g_now.day), plain ? "plain HTTP: not enough RAM for TLS" : "HTTPS",
+           describe(g_now.code, g_now.day), plain ? "HTTP" : "HTTPS",
            (unsigned)(g_internal_low / 1024));
       next = millis() + (uint32_t)std::max(5, minutes) * 60000;
     } else {

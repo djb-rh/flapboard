@@ -107,3 +107,22 @@ Per cell, on-device `bench` (serial):
   Home Assistant. Discovery (15 configs), commands, refused password, and the LWT on an unclean drop verified.
 - Port A 5 V (red wire, and the M5-Bus 5 V pin) is switched by IO expander 0 pin 2 (`setExtOutput(ext_PA)`);
   the firmware turns it on while a relay pin is configured.
+
+## Uploads wedging the Wi-Fi link (2026-10-01)
+- Symptom: large uploads stalled, the router stopped answering pings, the link watchdog restarted the sign.
+  Downloads (~730 KB/s) and small requests were fine. Phase 1's firmware on the same access point: 5/5.
+- Bisect: Phase 2 borderline (2/3), Phase 3 onwards failing. The ESP32-C6's SDIO link (esp-hosted-mcu#184
+  class) wedges on large *inbound bursts*; anything that loads the system makes it likelier:
+  - a running speaker (I2S + codec + amp): 1/6 with the speaker merely started, 6/6 with it stopped. M5's
+    `playRaw()` restarts an ended speaker by itself ("lazy begin"), so a feed racing `end()` left it running.
+    Now the speaker runs only while sound plays (started by the main loop when a board change begins,
+    stopped 2 s after the last clack, never during an upload), with a mutex between feeding and `end()`.
+  - HTTPS weather (mbedTLS takes ~40 KB of internal RAM here): weather is now plain HTTP.
+  - small allocations eating internal RAM: `heap_caps_malloc_extmem_enable(64)` moves them to PSRAM.
+- The fix that made uploads reliable: **upload in 16 KB pieces** (`/library/upload_part`). A request never
+  bursts more than its body. 32 KB pieces: 10/10 but one wedge (recovered by retries); 16 KB pieces: 12/12,
+  no wedges, ~170 KB/s. The multipart `/library/upload` (Pi API) stays for small files.
+- Not done (needs a custom ESP-IDF build via pioarduino's `custom_sdkconfig`, i.e. downloading the IDF):
+  smaller TCP window, slower SDIO clock, mbedTLS in PSRAM, more VFS slots.
+- Joining: the default fast scan took the first access point heard (a far one at -93 dBm with a near one
+  available). Now all-channel scan + strongest signal, and roaming when weak (rare scans: they can wedge too).

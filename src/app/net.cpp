@@ -90,7 +90,40 @@ void pingRouter() {
   esp_ping_start(g_ping);
 }
 
+// Roaming: the ESP32 never leaves an access point by itself. While the signal
+// is weak, look (rarely: scans have wedged this Wi-Fi link before) for a
+// clearly stronger access point on the same network, and move to it when
+// nothing is being uploaded.
+uint32_t g_roam_check = 0;
+int g_roams = 0;
+std::vector<Net> scanAll(bool allow_dups);
+void connect(const std::string &ssid, const std::string &pass, const uint8_t *bssid, int channel);
+
+void roam() {
+  if (g_state != State::Connected || g_portal) return;
+  if (!g_roam_check) g_roam_check = millis() + 60000;   // first look a minute after joining
+  if ((int32_t)(millis() - g_roam_check) < 0) return;
+  g_roam_check = millis() + 10 * 60000;
+  const int now = (int)WiFi.RSSI();
+  if (now >= -75 || millis() - g_busy_ms < 30000) return;
+  const uint8_t *cur = WiFi.BSSID();
+  uint8_t mine[6] = {0};
+  if (cur) memcpy(mine, cur, 6);
+  for (const Net &n : scanAll(true)) {
+    if (n.ssid != g_ssid) continue;
+    if (!memcmp(n.bssid, mine, 6)) break;   // ours is the strongest heard: stay
+    if (n.rssi < now + 8) break;            // not clearly better
+    note("wifi: moving to a stronger access point %02X:%02X:%02X:%02X:%02X:%02X (%d dBm, was %d dBm)", n.bssid[0],
+         n.bssid[1], n.bssid[2], n.bssid[3], n.bssid[4], n.bssid[5], n.rssi, now);
+    g_roams++;
+    WiFi.disconnect(false);   // not the radio: it cannot be restarted
+    connect(g_ssid, config::secrets::wifiPass(), n.bssid, n.channel);
+    return;
+  }
+}
+
 void watchLink() {
+  roam();
   if (g_state != State::Connected) {
     g_silent_checks = 0;
     return;
@@ -124,17 +157,29 @@ void watchLink() {
   }
 }
 
-std::vector<Net> doScan() {
+// Every access point heard (several may share one network name), strongest
+// first. allow_dups: keep each access point, not just each name.
+std::vector<Net> scanAll(bool allow_dups) {
   std::vector<Net> out;
   const int n = WiFi.scanNetworks();
   for (int i = 0; i < n; i++) {
     const std::string s = WiFi.SSID(i).c_str();
     if (s.empty()) continue;
     bool dup = false;
-    for (auto &o : out) dup |= o.ssid == s;
-    if (!dup) out.push_back({s, WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN});
+    if (!allow_dups)
+      for (auto &o : out) dup |= o.ssid == s;
+    if (dup) continue;
+    Net x{s, WiFi.RSSI(i), WiFi.encryptionType(i) == WIFI_AUTH_OPEN, {0}, WiFi.channel(i)};
+    if (const uint8_t *b = WiFi.BSSID(i)) memcpy(x.bssid, b, 6);
+    out.push_back(x);
   }
   WiFi.scanDelete();
+  std::sort(out.begin(), out.end(), [](const Net &a, const Net &b) { return a.rssi > b.rssi; });
+  return out;
+}
+
+std::vector<Net> doScan() {
+  std::vector<Net> out = scanAll(false);
   std::sort(out.begin(), out.end(), [](const Net &a, const Net &b) { return a.rssi > b.rssi; });
   return out;
 }
@@ -166,11 +211,17 @@ void stopPortal() {
   note("wifi setup hotspot closed");
 }
 
-void connect(const std::string &ssid, const std::string &pass) {
+void connect(const std::string &ssid, const std::string &pass, const uint8_t *bssid, int channel) {
   g_ssid = ssid;
   g_state = State::Connecting;
   g_join_ms = millis();
-  WiFi.begin(ssid.c_str(), pass.c_str());
+  // Scan every channel and take the strongest access point with this name.
+  // The default (fast scan) joins the FIRST one heard: with several access
+  // points on one network the sign sat on a far one at -93 dBm with a near
+  // one available.
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+  WiFi.begin(ssid.c_str(), pass.c_str(), channel, bssid);
   // No modem power saving: the C6 napping between beacons is a suspect in
   // the link dying while idle, and a wall sign has the milliamps to spare.
   WiFi.setSleep(false);
@@ -181,7 +232,7 @@ void reconnect() {
   if (s.empty()) return;
   g_wc.w.rejoins++;
   WiFi.disconnect(false);   // not the radio: it cannot be restarted
-  connect(s, config::secrets::wifiPass());
+  connect(s, config::secrets::wifiPass(), nullptr, 0);
 }
 
 void startMdns() {
@@ -223,7 +274,7 @@ void begin() {
     startPortal();
     return;
   }
-  connect(s, config::secrets::wifiPass());
+  connect(s, config::secrets::wifiPass(), nullptr, 0);
 }
 
 void loop() {
@@ -258,8 +309,9 @@ void loop() {
       g_state = State::Connected;
       g_ever_connected = true;
       startMdns();
-      note("wifi: joined %s as http://%s/ (%s.local), rssi %d", g_ssid.c_str(), WiFi.localIP().toString().c_str(),
-           config::hostname().c_str(), (int)WiFi.RSSI());
+      note("wifi: joined %s via %s as http://%s/ (%s.local), rssi %d", g_ssid.c_str(), WiFi.BSSIDstr().c_str(),
+           WiFi.localIP().toString().c_str(), config::hostname().c_str(), (int)WiFi.RSSI());
+      g_roam_check = 0;
       static bool reported = false;
       if (!reported) {
         reported = true;
@@ -291,7 +343,7 @@ void loop() {
   // phone is on the hotspot (joining moves the radio's channel under it).
   if (g_portal && g_state == State::Failed && !config::secrets::wifiSsid().empty() &&
       WiFi.softAPgetStationNum() == 0 && millis() - g_join_ms > 30000) {
-    connect(config::secrets::wifiSsid(), config::secrets::wifiPass());
+    connect(config::secrets::wifiSsid(), config::secrets::wifiPass(), nullptr, 0);
   }
   watchLink();
 }
@@ -313,6 +365,7 @@ std::string statusText() {
 }
 
 bool portalActive() { return g_portal; }
+std::string bssid() { return g_state == State::Connected ? WiFi.BSSIDstr().c_str() : ""; }
 std::string portalSsid() { return g_ap; }
 
 std::vector<Net> lastScan() {
@@ -339,7 +392,7 @@ void requestJoin(const std::string &ssid, const std::string &pass) {
 void join(const std::string &ssid, const std::string &pass) {
   config::secrets::setWifi(ssid, pass);
   WiFi.disconnect(false);
-  connect(ssid, pass);
+  connect(ssid, pass, nullptr, 0);
 }
 
 std::string coprocVersion() {
@@ -372,6 +425,12 @@ bool coprocUpdateAvailable() {
 void requestCoprocUpdate() { g_want_coproc_update = true; }
 Watch watch() { return g_wc.w; }
 void markBusy() { g_busy_ms = millis(); }
+volatile uint32_t g_upload_ms = 0;
+void markUploading() {
+  g_upload_ms = millis();
+  if (!g_upload_ms) g_upload_ms = 1;
+}
+bool uploading() { return g_upload_ms && millis() - g_upload_ms < 3000; }
 
 }  // namespace net
 }  // namespace flapboard

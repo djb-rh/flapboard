@@ -22,7 +22,10 @@ void reloadClips();
 void setVolume(int volume, bool preview = true);
 void setEnabled(bool enabled);
 int volume();
-void setSuppressed(bool quiet);   // the display is off: no clacks (without touching the saved setting)
+void setSuppressed(bool quiet);
+// Sound is about to be needed (a board change is starting): start the
+// speaker now so the first clacks are not lost. Any task.
+void wake();   // the display is off: no clacks (without touching the saved setting)
 bool enabled();               // pick up /flapboard/sounds/clack_*.wav again
 std::string statsJson();
 // Records the next `seconds` of mixer output to path (a WAV), for checking

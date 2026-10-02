@@ -152,6 +152,19 @@ async function loadImages(){const sels=[$('#side_left'),$('#side_right')];
   for(const s of sels){s.innerHTML='<option value="">None</option>';for(const e of list)s.add(new Option(e.name,e.path))}}
 let side='left';
 $('#up_left').onclick=()=>{side='left';$('#picker').click()};$('#up_right').onclick=()=>{side='right';$('#picker').click()};
+// Sends a file to the sign in 16 KB pieces (/library/upload_part). The
+// Tab5's Wi-Fi chip wedges on large inbound bursts; a request never bursts
+// more than its own body. Each piece is retried; onProgress(0..1).
+async function putInPieces(folder,name,blob,onProgress,thumb){
+  const id=Math.random().toString(36).slice(2,12),total=blob.size,piece=16384;let off=0,last=null;
+  do{const body=blob.slice(off,off+piece);let ok=false;
+    for(let a=0;a<4&&!ok;a++){if(a)await new Promise(r=>setTimeout(r,1500*a));
+      try{const q=new URLSearchParams({path:folder,name,id,offset:off,total});if(thumb)q.set('thumb','1');
+        const r=await fetch('/library/upload_part?'+q,{method:'POST',body});last=await r.json();
+        if(r.ok)ok=true;else if(r.status<500&&r.status!==409)return{ok:false,data:last,status:r.status}}catch(e){last={error:'connection lost'}}}
+    if(!ok)return{ok:false,data:last||{error:'connection lost'},status:0};
+    off+=body.size;if(onProgress)onProgress(total?off/total:1)}while(off<total);
+  return{ok:true,data:last,status:200}}
 $('#picker').onchange=async function(){const f=this.files[0];if(!f)return;this.value='';
   const c=Object.assign({},cur,{['side_'+side]:'x'});const L=layoutOf(c);const slot=L[side];
   const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=URL.createObjectURL(f)}).catch(()=>null);
@@ -162,9 +175,8 @@ $('#picker').onchange=async function(){const f=this.files[0];if(!f)return;this.v
   const w=img.naturalWidth*k,h=img.naturalHeight*k;ctx.imageSmoothingQuality='high';ctx.drawImage(img,(slot.w-w)/2,(slot.h-h)/2,w,h);
   const blob=await new Promise(r=>cv.toBlob(r,'image/png'));
   const name=side+'-'+f.name.replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9 _-]/g,'').slice(0,40)+'.png';
-  const fd=new FormData();fd.append('path','images');fd.append('file',blob,name);
-  const r=await fetch('/library/upload',{method:'POST',body:fd});const d=await r.json();
-  if(!r.ok){note('err',d.error||'Upload failed');return}
+  const res=await putInPieces('images',name,blob);const d=res.data||{};
+  if(!res.ok){note('err',d.error||'Upload failed');return}
   await loadImages();const p=d.saved[0];const sel=$('#side_'+side);sel.value=p;fillForm(Object.assign(readForm(),{['side_'+side]:p}));onChange();
   note('ok','Uploaded '+p+' at '+slot.w+' x '+slot.h+' px. Save to put it on the sign.')};
 document.querySelectorAll('input,select').forEach(el=>{if(el.id!=='picker')el.addEventListener('input',onChange)});

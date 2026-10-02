@@ -337,6 +337,12 @@ void loopInner() {
     }
   }
   if (photo_program) {
+    // While an upload is arriving, leave the card alone: the SD slot shares
+    // the P4's SDIO host with the Wi-Fi chip, and a photo decode or a rescan
+    // of the library (after every uploaded file) in the middle of one wedged
+    // the link three times in a few minutes. The current photo stays up; the
+    // slideshow carries on 3 s after the last piece.
+    if (g_have && net::uploading()) return;
     if (g_photos_dirty || millis() - g_photos_loaded > 300000) {
       g_photos = sdcard::mounted() ? photos::scan(std::string(sdcard::mountPoint()) + "/flapboard") : std::vector<photos::Photo>();
       g_photos_dirty = false;

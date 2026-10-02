@@ -92,12 +92,14 @@ void mem(const char *stage) {
 }
 
 void setup() {
-  // Ordinary allocations above 64 bytes go to PSRAM (the prebuilt default is
-  // 4 KB). Internal RAM is what the Wi-Fi chip's receive buffers need; once
+  // Ordinary allocations above 32 bytes go to PSRAM (the prebuilt default is
+  // 4 KB; 64 was not enough once the photo index held ~400 paths of ~50
+  // characters each: tens of KB of internal RAM, and the Wi-Fi link wedged
+  // again). Internal RAM is what the Wi-Fi chip's receive buffers need; once
   // the settings JSON, strings and status documents had eaten it (largest DMA
   // block 35 KB), uploads wedged the link and the watchdog restarted the sign.
   // DMA and driver buffers ask for internal memory explicitly and stay there.
-  heap_caps_malloc_extmem_enable(64);
+  heap_caps_malloc_extmem_enable(32);
   // Settings first, so the relay pin is driven OFF before anything else runs:
   // a reboot must never flash the car's lights.
   config::begin();

@@ -32,7 +32,9 @@ def put(folder, name, data, thumb=False):
                 except Exception: pass
                 if e.code == 409 and isinstance(info.get('have'), int) and info['have'] < off:
                     off = info['have']; break       # resume where the sign's copy ends
-                if e.code < 500 and e.code != 409: raise
+                # 404 "destination folder does not exist" can be the card
+                # answering badly while the link is busy: retry it like a 5xx.
+                if e.code < 500 and e.code not in (404, 409): raise
             except Exception:
                 pass
             if time.time() - t0 > 150: raise RuntimeError('the sign stopped answering')
@@ -46,6 +48,15 @@ for part in dest.split('/'):   # make the folder (an existing one is fine)
     except Exception: pass
     acc = f'{acc}/{part}' if acc else part
 names = sorted(f for f in os.listdir(local) if f.lower().endswith('.jpg') and not f.startswith('.'))
+# Skip what's already there at the same size (a run picked up again after a failure).
+try:
+    with urllib.request.urlopen(f'http://{host}/library/list?' + urllib.parse.urlencode({'path': dest}), timeout=30) as r:
+        have = {e['name']: e.get('size') for e in json.load(r)['entries'] if e['type'] == 'file'}
+except Exception:
+    have = {}
+skip = [n for n in names if have.get(n) == os.path.getsize(os.path.join(local, n))]
+if skip: print(f'{len(skip)} already on the sign, skipped', flush=True)
+names = [n for n in names if n not in skip]
 t0 = time.time(); sent = 0
 for i, n in enumerate(names, 1):
     data = open(os.path.join(local, n), 'rb').read()

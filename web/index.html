@@ -106,7 +106,7 @@ $('#fwfile').onchange=async function(){const f=this.files[0];this.value='';if(!f
   const r=await pieces('/api/ota',{},f,bar);bar(null);
   if(!r.ok){busy(false);note('err',r.data.error||'Update failed');return}
   note('ok','Installed. Restarting into the new firmware; this page reloads when the sign is back.');
-  const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store'})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
+  const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(3000)})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
     if(Date.now()-t0<180000)setTimeout(wait,3000);else{busy(false);note('err','The sign has not come back yet. Check it, then reload this page.')}},8000)};
 $('#backup').onclick=()=>{location.href='/api/backup'};
 $('#restbtn').onclick=()=>$('#restfile').click();

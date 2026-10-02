@@ -60,7 +60,7 @@ $('#sdformat').onclick=async()=>{
   const r=await fetch('/api/sdformat',{method:'POST',body:JSON.stringify({confirm:'ERASE'})});const d=await r.json();
   if(!r.ok){note('err',d.error||'Could not start the format');return}
   $('#sdformat').disabled=true;$('#sdmsg').innerHTML='<div class="msg ok">Restarting to format the card. This page reloads when the sign is back (about a minute).</div>';
-  const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store'})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
+  const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(3000)})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
     if(Date.now()-t0<240000)setTimeout(wait,3000);else $('#sdmsg').innerHTML='<div class="msg err">The sign has not come back yet. Check it, then reload this page.</div>'},10000)};
 async function go(path){cwd=path||'';
   try{const r=await fetch('/library/list?path='+encodeURIComponent(cwd));const d=await r.json();

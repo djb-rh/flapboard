@@ -1,0 +1,67 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Photos - FlapBoard</title><link rel="stylesheet" href="/style.css">
+<style>.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 14px}
+.tree{margin-top:8px;border:1px solid var(--border);border-radius:10px;padding:8px;max-height:460px;overflow:auto;background:var(--panel2)}
+.node{display:flex;align-items:center;gap:8px;padding:3px 0;font-size:14px}.node input{width:auto}
+.node img{width:56px;height:32px;object-fit:cover;border-radius:4px;background:var(--panel)}
+.node .tw{width:22px;text-align:center;cursor:pointer;color:var(--dim);user-select:none}
+.kids{margin-left:26px}.hint{font-size:13px;color:var(--dim);margin:6px 0 0}
+.savebar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}</style></head><body>
+<header><div class="in"><b id="name">FlapBoard</b>
+<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/photos" class="on">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<main><div id="note"></div>
+<section class="card"><h2>Photo frame</h2><p id="state" style="margin:0 0 8px">...</p>
+<div class="row" style="margin-top:0"><button id="go">Show photos now</button><button class="sec" id="back">Back to the board</button></div>
+<p class="hint">Add photos in <a href="/library">Files</a>, inside the photos folder (folders inside it work too). Photos uploaded there are shrunk to the screen's size on the way. Photos copied straight onto the card must be PNG or ordinary (baseline) JPEG; others are skipped. The schedule can switch to photos at set times.</p></section>
+
+<section class="card"><h2>How they are shown</h2><div class="g">
+<div><label for="photo_order">Order</label><select id="photo_order"><option value="random">Random</option><option value="name_asc">By name, A to Z</option><option value="name_desc">By name, Z to A</option><option value="date_asc">Oldest first</option><option value="date_desc">Newest first</option></select></div>
+<div><label for="photo_dwell">Seconds per photo</label><input id="photo_dwell" type="number" min="5" max="3600"></div>
+<div><label for="photo_transition">Change</label><select id="photo_transition"><option value="dissolve">Dissolve</option><option value="slide">Slide</option><option value="cut">Cut</option></select></div>
+<div><label for="photo_transition_ms">Change takes (ms)</label><input id="photo_transition_ms" type="number" min="100" max="3000" step="50"></div>
+<div><label for="photo_fit">Fit</label><select id="photo_fit"><option value="contain">Whole photo</option><option value="cover">Fill the screen (crops)</option></select></div>
+<div><label for="photo_blur">Around a whole photo</label><select id="photo_blur"><option value="1">A blurred copy of it</option><option value="0">Black</option></select></div>
+<div><label for="photo_clock">Clock over the photo</label><select id="photo_clock"><option value="0">No</option><option value="1">Yes</option></select></div>
+<div><label for="photo_clock_pos">Clock position</label><select id="photo_clock_pos"><option value="bottom_right">Bottom right</option><option value="bottom_left">Bottom left</option><option value="top_right">Top right</option><option value="top_left">Top left</option></select></div>
+</div><p class="hint">A message sent from the Messages page or Home Assistant appears over the photo while it lasts.</p></section>
+
+<section class="card"><h2>Which photos</h2>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text)"><input type="checkbox" id="all" style="width:auto"> All of them</label>
+<p class="hint">Or tick folders (everything in them, including photos added later) and single photos.</p>
+<div class="tree" id="tree"><span class="dim">Loading...</span></div></section>
+
+<div class="savebar"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
+</main>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>({ok:r.ok,d:await r.json()}));
+const KEYS=['photo_order','photo_dwell','photo_transition','photo_transition_ms','photo_fit','photo_blur','photo_clock','photo_clock_pos'];
+let sel=new Set(),saved='';
+function body(){const b={};KEYS.forEach(k=>{const v=$('#'+k).value;b[k]=['photo_dwell','photo_transition_ms'].includes(k)?+v:(k==='photo_blur'||k==='photo_clock')?v==='1':v});
+  b.photo_selection=$('#all').checked?[]:[...sel];return b}
+function dirty(){$('#dirty').textContent=JSON.stringify(body())!==saved?'Unsaved changes':''}
+async function folder(path,el){
+  let d;try{d=await (await fetch('/library/list?path='+encodeURIComponent(path))).json()}catch(e){el.innerHTML='<span class="dim">Could not read the card.</span>';return}
+  const items=(d.entries||[]).filter(e=>e.type==='dir'||e.is_image);
+  if(!items.length){el.innerHTML='<span class="dim">'+(path==='photos'?'No photos yet.':'Empty.')+'</span>';return}
+  el.innerHTML='';for(const e of items){const row=document.createElement('div');
+    row.innerHTML='<div class="node">'+(e.type==='dir'?'<span class="tw">&#9656;</span>':'<span class="tw"></span>')+
+      '<input type="checkbox" data-p="'+esc(e.path)+'"'+(sel.has(e.path)?' checked':'')+'>'+(e.type==='dir'?'&#128193;':'<img loading="lazy" src="/library/thumb?path='+encodeURIComponent(e.path)+'" onerror="this.style.visibility=\'hidden\'">')+
+      '<span>'+esc(e.name)+'</span></div>'+(e.type==='dir'?'<div class="kids" hidden></div>':'');
+    el.appendChild(row);
+    row.querySelector('input').onchange=ev=>{if(ev.target.checked)sel.add(e.path);else sel.delete(e.path);if(sel.size)$('#all').checked=false;dirty()};
+    const tw=row.querySelector('.tw');if(e.type==='dir')tw.onclick=async()=>{const k=row.querySelector('.kids');k.hidden=!k.hidden;tw.innerHTML=k.hidden?'&#9656;':'&#9662;';if(!k.hidden&&!k.dataset.loaded){k.dataset.loaded=1;await folder(e.path,k)}}}}
+$('#all').onchange=()=>{if($('#all').checked){sel.clear();document.querySelectorAll('[data-p]').forEach(c=>c.checked=false)}dirty()};
+document.addEventListener('input',dirty);document.addEventListener('change',dirty);
+$('#save').onclick=async()=>{const b=body();const r=await post('/api/config',b);if(!r.ok){note('err',r.d.error);return}saved=JSON.stringify(b);dirty();note('ok','Saved.')};
+$('#go').onclick=async()=>{await post('/api/config',Object.assign(body(),{content_source:'photos'}));saved=JSON.stringify(body());dirty();note('ok','Showing photos.');setTimeout(status,1500)};
+$('#back').onclick=async()=>{await post('/api/config',{content_source:'messages'});note('ok','Back to the board.');setTimeout(status,1500)};
+async function status(){try{const s=await (await fetch('/api/status')).json();$('#name').textContent=s.device_name;const c=s.content;
+  $('#state').innerHTML=(c.source==='photos'?'Showing photos ('+esc(c.reason)+').'+(c.file?' Now: '+esc(c.file.replace(/^photos\//,''))+'.':''):'The sign is showing '+esc(c.source)+' ('+esc(c.reason)+').')+' '+c.photos+' photos on the card.'}catch(e){}}
+(async()=>{const c=await (await fetch('/api/config')).json();
+  KEYS.forEach(k=>{const v=c[k];$('#'+k).value=typeof v==='boolean'?(v?'1':'0'):v});
+  sel=new Set(c.photo_selection||[]);$('#all').checked=sel.size===0;await folder('photos',$('#tree'));saved=JSON.stringify(body());dirty();status();setInterval(status,5000)})();
+</script></body></html>

@@ -4,6 +4,7 @@
 #include <SD_MMC.h>   // before M5Unified, so M5GFX can draw images from it
 #include <M5Unified.h>
 #include <esp_cache.h>
+#include <driver/ppa.h>
 #include <esp_heap_caps.h>
 #include <lgfx/v1/platforms/esp32p4/Panel_DSI.hpp>
 #include <esp_timer.h>
@@ -25,8 +26,10 @@
 #include <flapcore/render.h>
 #include <flapcore/theme.h>
 #include <flapcore/truetype.h>
+#include <flapcore/template.h>
 
 #include "generated/fonts.h"
+#include "clock.h"
 #include "config.h"
 #include "net.h"
 #include "note.h"
@@ -285,15 +288,10 @@ void drawButton(const Button &b, const char *label, uint16_t bg, uint16_t fg, co
   d.drawString(label, b.x + b.w / 2, b.y + b.h / 2);
 }
 
-void drawLevel(const char *label, int value, bool on, const Button &down, const Button &up) {
+// Just the bar between a level's - and + buttons (what a tap changes).
+void drawLevelBar(int value, bool on, const Button &down, const Button &up) {
   auto &d = M5.Display;
-  const uint16_t panel = 0x2124, ink = 0xF79E, dim = 0xA534, accent = 0xEC20, btn = 0x39C7;
-  d.setFont(&lgfx::fonts::FreeSans12pt7b);
-  d.setTextDatum(bottom_left);
-  d.setTextColor(dim, panel);
-  d.drawString(label, down.x, down.y - 8);
-  drawButton(down, "-", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
-  drawButton(up, "+", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
+  const uint16_t ink = 0xF79E, accent = 0xEC20;
   const int bx = down.x + down.w + 18, bw = up.x - 18 - bx, by = down.y + 20, bh = down.h - 40;
   d.fillRoundRect(bx, by, bw, bh, 12, 0x18E3);
   if (on && value > 0) d.fillRoundRect(bx, by, std::max(24, bw * value / 100), bh, 12, accent);
@@ -303,6 +301,49 @@ void drawLevel(const char *label, int value, bool on, const Button &down, const 
   char t[16];
   snprintf(t, sizeof(t), on ? "%d%%" : "MUTED", value);
   d.drawString(t, bx + bw / 2, by + bh / 2);
+}
+
+void drawLevel(const char *label, int value, bool on, const Button &down, const Button &up) {
+  auto &d = M5.Display;
+  const uint16_t panel = 0x2124, ink = 0xF79E, dim = 0xA534, btn = 0x39C7;
+  d.setFont(&lgfx::fonts::FreeSans12pt7b);
+  d.setTextDatum(bottom_left);
+  d.setTextColor(dim, panel);
+  d.drawString(label, down.x, down.y - 8);
+  drawButton(down, "-", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
+  drawButton(up, "+", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
+  drawLevelBar(value, on, down, up);
+}
+
+// After a tap: repaint only the controls whose state can have changed, not
+// the whole sheet (repainting it all made the sheet flash on every press).
+struct ShownControls {
+  int vol = -1, bri = -1;
+  int on = -1;
+  std::string source;
+} g_shown_ctl;
+
+void drawControlsState() {
+  const uint16_t ink = 0xF79E, accent = 0xEC20, btn = 0x39C7;
+  int bri;
+  std::string source;
+  {
+    config::Reader r;
+    bri = r.doc()["brightness"] | 80;
+    source = r.doc()["content_source"] | "messages";
+  }
+  const int vol = sound::volume(), on = sound::enabled() ? 1 : 0;
+  auto &c = g_shown_ctl;
+  M5.Display.startWrite();
+  if (vol != c.vol || on != c.on) drawLevelBar(vol, on, kVolDown, kVolUp);
+  if (bri != c.bri) drawLevelBar(bri, true, kBriDown, kBriUp);
+  if (source != c.source)
+    for (int i = 0; i < 4; i++)
+      if (source == kModeSources[i] || c.source == kModeSources[i])   // only the old and the new choice
+        drawButton(kModes[i], kModeLabels[i], source == kModeSources[i] ? accent : btn, ink, &lgfx::fonts::FreeSans12pt7b);
+  if (on != c.on) drawButton(kMute, on ? "Mute" : "Unmute", on ? btn : accent, ink, &lgfx::fonts::FreeSans12pt7b);
+  M5.Display.endWrite();
+  c = {vol, bri, on, source};
 }
 
 void drawPanel() {
@@ -380,6 +421,7 @@ void drawPanel() {
   drawButton(kShowIp, "Show IP", btn, ink, &lgfx::fonts::FreeSans12pt7b);
   drawButton(kClose, "Close", btn, ink, &lgfx::fonts::FreeSansBold12pt7b);
   d.endWrite();
+  g_shown_ctl = {sound::volume(), bri, sound::enabled() ? 1 : 0, source};
 }
 
 // Returns true while the panel is up (the board is not drawn meanwhile).
@@ -415,12 +457,12 @@ bool runPanel(SignState &st) {
       for (int i = 0; i < 4; i++)
         if (kModes[i].hit(x, y)) post(ActionKind::Source, i);
     }
-    if (!close) drawPanel();
+    if (!close) drawControlsState();
     else g_panel_until = 0;
   }
   if (g_redraw_at && (int32_t)(millis() - g_redraw_at) >= 0) {
     g_redraw_at = 0;
-    drawPanel();
+    drawControlsState();   // the main loop has applied the change by now
   }
   if ((int32_t)(millis() - g_panel_until) >= 0) {
     g_panel_open = false;
@@ -483,6 +525,354 @@ struct Stats {
   uint64_t draw_us = 0, max_us = 0, blit_us = 0, sync_us = 0;
 } g_stats, g_last;
 
+
+// ---- photo mode ------------------------------------------------------------------
+//
+// Two full-screen canvases in PSRAM, created in the panel's native (portrait)
+// layout with the display's rotation, so a canvas's memory is laid out exactly
+// like the framebuffer: showing one is a straight copy (M5GFX keeps sprite
+// pixels byte-swapped, hence the bswap). Transitions blend or shift between
+// the two straight into panel memory.
+
+enum class Mode { Board, Photo };
+volatile Mode g_mode_req = Mode::Board;
+std::string g_photo_req, g_caption_req;
+volatile bool g_photo_pending = false, g_caption_pending = false;
+std::string g_photo_failed;
+volatile bool g_photo_failed_flag = false;
+
+struct PhotoState {
+  M5Canvas *cur = nullptr, *next = nullptr;
+  M5Canvas *tiny = nullptr;   // the blur-fill source
+  std::string shown, caption;
+  int rot = 3;
+  int last_minute = -1;
+  Rect overlay{0, 0, 0, 0};   // where text was drawn (restored before redrawing)
+  uint32_t decode_ms = 0, transition_ms = 0, frames = 0;
+} g_ph;
+
+bool ensureCanvases(int rot) {
+  if (g_ph.cur && g_ph.rot == rot) return true;
+  for (M5Canvas **c : {&g_ph.cur, &g_ph.next}) {
+    if (*c) {
+      (*c)->deleteSprite();
+      delete *c;
+    }
+    *c = new M5Canvas(&M5.Display);
+    (*c)->setPsram(true);
+    (*c)->setColorDepth(16);
+    if (!(*c)->createSprite(720, 1280)) return false;
+    (*c)->setRotation(rot);
+    (*c)->fillScreen(TFT_BLACK);
+  }
+  if (!g_ph.tiny) {
+    g_ph.tiny = new M5Canvas(&M5.Display);
+    g_ph.tiny->setPsram(true);
+    g_ph.tiny->setColorDepth(16);
+    g_ph.tiny->createSprite(64, 36);
+  }
+  g_ph.rot = rot;
+  return true;
+}
+
+struct PhotoSettings {
+  std::string transition = "dissolve", fit = "contain";
+  int transition_ms = 700;
+  bool blur = true, clock = false;
+  std::string clock_pos = "bottom_right", time_format = "%-I:%M %p";
+};
+
+PhotoSettings photoSettings() {
+  PhotoSettings p;
+  config::Reader r;
+  auto &d = r.doc();
+  p.transition = d["photo_transition"] | "dissolve";
+  p.transition_ms = clampv<int>(d["photo_transition_ms"] | 700, 100, 3000);
+  p.fit = d["photo_fit"] | "contain";
+  p.blur = d["photo_blur"] | true;
+  p.clock = d["photo_clock"] | false;
+  p.clock_pos = d["photo_clock_pos"] | "bottom_right";
+  p.time_format = d["time_format"] | "%-I:%M %p";
+  return p;
+}
+
+// Decodes a library photo ("photos/x.jpg") into the canvas: blurred cover
+// background, then the photo fitted on top.
+bool decodePhoto(M5Canvas &c, const std::string &rel, const PhotoSettings &ps) {
+  const std::string vfs = std::string(sdcard::mountPoint()) + "/flapboard/" + rel;
+  const std::string fsp = "/flapboard/" + rel;
+  std::string lower = rel;
+  for (auto &ch : lower) ch = (char)tolower((unsigned char)ch);
+  const bool png = lower.size() > 4 && lower.compare(lower.size() - 4, 4, ".png") == 0;
+  int iw = 0, ih = 0;
+  if (!imageSize(vfs, &iw, &ih)) {
+    note("photo: %s: cannot read its size", rel.c_str());
+    return false;
+  }
+  const int W = c.width(), H = c.height();
+  auto draw = [&](lgfx::LGFXBase &dst, int x, int y, int w, int h, float zoom) {
+    return png ? dst.drawPngFile((fs::FS &)SD_MMC, fsp.c_str(), x, y, w, h, 0, 0, zoom, zoom, middle_center)
+               : dst.drawJpgFile((fs::FS &)SD_MMC, fsp.c_str(), x, y, w, h, 0, 0, zoom, zoom, middle_center);
+  };
+  c.fillScreen(TFT_BLACK);
+  const float contain = std::min(W / (float)iw, H / (float)ih), cover = std::max(W / (float)iw, H / (float)ih);
+  if (ps.fit == "contain" && ps.blur && std::fabs(contain - cover) > 0.01f) {
+    // The Pi frame's blur fill: the photo, tiny and covering, scaled up
+    // smoothly (and dimmed) behind the real one instead of black bars.
+    auto &t = *g_ph.tiny;
+    t.fillScreen(TFT_BLACK);
+    if (!draw(t, 0, 0, 64, 36, std::max(64.0f / iw, 36.0f / ih))) note("photo: %s: blur copy failed", rel.c_str());
+    // Bilinear enlargement, dimmed to ~55%, written straight into the canvas
+    // memory (panel layout, byte-swapped pixels). M5GFX's 20x zoom was blocky.
+    const uint16_t *sp = (const uint16_t *)t.getBuffer();
+    uint16_t *dp = (uint16_t *)c.getBuffer();
+    const int pw = 720, ph = 1280;   // the canvas's native size
+    // Integer bilinear: the tiny picture unpacked once, weights per column
+    // and row computed once (the float version added 0.8 s per photo).
+    static uint8_t ch[3][36][64];
+    for (int y = 0; y < 36; y++)
+      for (int x = 0; x < 64; x++) {
+        const uint16_t v = __builtin_bswap16(sp[y * 64 + x]);
+        ch[0][y][x] = (v >> 11) & 31;
+        ch[1][y][x] = (v >> 5) & 63;
+        ch[2][y][x] = v & 31;
+      }
+    // Blur the tiny picture itself (three 3x3 box passes ~ a Gaussian): an
+    // enlarged 64x36 image otherwise shows its pixels as soft squares.
+    static uint8_t tmp[36][64];
+    for (int k = 0; k < 3; k++)
+      for (int pass = 0; pass < 3; pass++) {
+        for (int y = 0; y < 36; y++)
+          for (int x = 0; x < 64; x++) {
+            int sum = 0, n = 0;
+            for (int dy = -1; dy <= 1; dy++)
+              for (int dx = -1; dx <= 1; dx++) {
+                const int yy = y + dy, xx = x + dx;
+                if (yy < 0 || yy >= 36 || xx < 0 || xx >= 64) continue;
+                sum += ch[k][yy][xx];
+                n++;
+              }
+            tmp[y][x] = (uint8_t)(sum / n);
+          }
+        memcpy(ch[k], tmp, sizeof(tmp));
+      }
+    static uint8_t x0s[1280], x1s[1280], txs[1280];
+    for (int x = 0; x < W; x++) {
+      const int f = std::max(0, std::min(63 * 256, ((2 * x + 1) * 64 * 256 / (2 * W)) - 128));
+      x0s[x] = f >> 8;
+      x1s[x] = std::min(63, (f >> 8) + 1);
+      txs[x] = f & 255;
+    }
+    for (int y = 0; y < H; y++) {
+      const int f = std::max(0, std::min(35 * 256, ((2 * y + 1) * 36 * 256 / (2 * H)) - 128));
+      const int y0 = f >> 8, y1 = std::min(35, y0 + 1), ty = f & 255;
+      for (int x = 0; x < W; x++) {
+        const int a0 = x0s[x], a1 = x1s[x], tx = txs[x];
+        uint32_t out[3];
+        for (int k = 0; k < 3; k++) {
+          const int top = ch[k][y0][a0] * (256 - tx) + ch[k][y0][a1] * tx;
+          const int bot = ch[k][y1][a0] * (256 - tx) + ch[k][y1][a1] * tx;
+          out[k] = (uint32_t)((top * (256 - ty) + bot * ty) >> 16) * 140 >> 8;   // dimmed to ~55%
+        }
+        const int row = g_ph.rot == 3 ? ph - 1 - x : x, col = g_ph.rot == 3 ? y : pw - 1 - y;
+        dp[row * pw + col] = __builtin_bswap16((uint16_t)((out[0] << 11) | (out[1] << 5) | out[2]));
+      }
+    }
+  }
+  const bool ok = draw(c, 0, 0, W, H, ps.fit == "cover" ? cover : contain);
+  if (!ok)
+    note("photo: %s: decoder refused it (%dx%d; internal RAM %u KB, PSRAM largest %u KB)", rel.c_str(), iw, ih,
+         (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+         (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
+  return ok;
+}
+
+// The P4's 2D engine: a dissolve frame is one hardware blend of the two
+// canvases (byte-swapped inputs, as M5GFX stores sprites) straight into the
+// framebuffer. The CPU version managed ~8 frames a second.
+ppa_client_handle_t g_ppa = nullptr;
+bool g_ppa_failed = false;
+
+bool ppaBlend(PanelSurface &surf, M5Canvas *bg, M5Canvas *fg, int alpha) {
+  if (g_ppa_failed) return false;
+  if (!g_ppa) {
+    ppa_client_config_t c = {};
+    c.oper_type = PPA_OPERATION_BLEND;
+    if (ppa_register_client(&c, &g_ppa) != ESP_OK) {
+      g_ppa_failed = true;
+      return false;
+    }
+  }
+  auto in = [&](M5Canvas *cv) {
+    ppa_in_pic_blk_config_t b = {};
+    b.buffer = cv->getBuffer();
+    b.pic_w = surf.pw;
+    b.pic_h = surf.ph;
+    b.block_w = surf.pw;
+    b.block_h = surf.ph;
+    b.blend_cm = PPA_BLEND_COLOR_MODE_RGB565;
+    return b;
+  };
+  ppa_blend_oper_config_t o = {};
+  o.in_bg = in(bg ? bg : fg);
+  o.in_fg = in(fg);
+  o.out.buffer = surf.fb;
+  o.out.buffer_size = surf.stride * surf.ph;
+  o.out.pic_w = surf.pw;
+  o.out.pic_h = surf.ph;
+  o.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB565;
+  o.bg_byte_swap = true;
+  o.fg_byte_swap = true;
+  o.bg_alpha_update_mode = PPA_ALPHA_FIX_VALUE;
+  o.bg_alpha_fix_val = 255;
+  o.fg_alpha_update_mode = PPA_ALPHA_FIX_VALUE;
+  o.fg_alpha_fix_val = (uint32_t)std::max(0, std::min(255, alpha));
+  o.mode = PPA_TRANS_MODE_BLOCKING;
+  const esp_err_t e = ppa_do_blend(g_ppa, &o);
+  if (e != ESP_OK) {
+    note("photo: hardware blend unavailable (%s); using the CPU", esp_err_to_name(e));
+    g_ppa_failed = true;
+    return false;
+  }
+  return true;
+}
+
+// Canvas -> framebuffer. mix 0..256 blends from `from` (0) to `to` (256);
+// shift slides `to` in from the right by that many logical pixels left to go.
+void showFrame(PanelSurface &surf, M5Canvas *from, M5Canvas *to, int mix, int shift) {
+  uint16_t *fb = (uint16_t *)surf.fb;
+  const uint16_t *a = from ? (const uint16_t *)from->getBuffer() : nullptr;
+  const uint16_t *b = (const uint16_t *)to->getBuffer();
+  const size_t n = (size_t)surf.pw * surf.ph;
+  if (shift <= 0 && ppaBlend(surf, from, to, mix >= 256 || !a ? 255 : mix)) return;   // hardware; it syncs the caches
+  if (shift > 0 && a) {
+    // Logical x runs along panel rows (rotation 3: row = ph-1-x). Rows whose
+    // logical x < 1280-shift show `from` moved left by (1280-shift)... i.e.
+    // the old picture leaving and the new arriving, row blocks only.
+    const int W = surf.ph, sh = shift;
+    for (int x = 0; x < W; x++) {
+      const int row = surf.rot == 3 ? surf.ph - 1 - x : x;
+      const int src_x = x + (W - sh);            // into the old picture, shifted left
+      const bool old = src_x < W;
+      const int sx = old ? src_x : src_x - W;    // into the new one
+      const int srow = surf.rot == 3 ? surf.ph - 1 - sx : sx;
+      const uint16_t *src = (old ? a : b) + (size_t)srow * surf.pw;
+      uint16_t *dst = fb + (size_t)row * surf.pw;
+      for (int i = 0; i < surf.pw; i++) dst[i] = __builtin_bswap16(src[i]);
+    }
+  } else if (mix >= 256 || !a) {
+    for (size_t i = 0; i < n; i++) fb[i] = __builtin_bswap16(b[i]);
+  } else {
+    const uint32_t k = (uint32_t)mix, j = 256 - k;
+    for (size_t i = 0; i < n; i++) {
+      const uint16_t p = __builtin_bswap16(a[i]), q = __builtin_bswap16(b[i]);
+      const uint32_t rb = (((p & 0xF81Fu) * j + (q & 0xF81Fu) * k) >> 8) & 0xF81Fu;
+      const uint32_t g = (((p & 0x07E0u) * j + (q & 0x07E0u) * k) >> 8) & 0x07E0u;
+      fb[i] = (uint16_t)(rb | g);
+    }
+  }
+  esp_cache_msync(surf.fb, surf.stride * surf.ph, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
+// Put back what the canvas has under a logical rectangle (before redrawing
+// the clock or a caption over the photo).
+void restoreRect(PanelSurface &surf, const Rect &r) {
+  if (r.w <= 0 || !g_ph.cur) return;
+  const uint16_t *src = (const uint16_t *)g_ph.cur->getBuffer();
+  uint16_t *fb = (uint16_t *)surf.fb;
+  for (int x = r.x; x < r.x + r.w; x++) {
+    const int row = surf.rot == 3 ? surf.ph - 1 - x : x;
+    const int c0 = surf.rot == 3 ? r.y : surf.pw - (r.y + r.h), c1 = c0 + r.h;
+    for (int c = std::max(0, c0); c < std::min(surf.pw, c1); c++)
+      fb[(size_t)row * surf.pw + c] = __builtin_bswap16(src[(size_t)row * surf.pw + c]);
+  }
+  esp_cache_msync(surf.fb, surf.stride * surf.ph, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+}
+
+// The clock and/or a message over the photo, outlined so it reads on any picture.
+void drawOverlay(PanelSurface &surf, const PhotoSettings &ps) {
+  restoreRect(surf, g_ph.overlay);
+  g_ph.overlay = {0, 0, 0, 0};
+  std::string text;
+  if (!g_ph.caption.empty()) text = g_ph.caption;
+  else if (ps.clock) {
+    struct tm t;
+    if (clock::localNow(&t)) text = flapcore::formatTime(ps.time_format, t);
+    g_ph.last_minute = t.tm_min;
+  }
+  if (text.empty()) return;
+  for (auto &ch : text)
+    if (ch == '|' || ch == '\n') ch = ' ';
+  auto &d = M5.Display;
+  const bool caption = !g_ph.caption.empty();
+  d.setFont(caption ? &lgfx::fonts::DejaVu40 : &lgfx::fonts::DejaVu72);   // native sizes: no doubled pixels
+  d.setTextSize(1);
+  const int tw = d.textWidth(text.c_str()), th = d.fontHeight();
+  const int W = d.width(), H = d.height(), m = 36;
+  int x = W - m - tw, y = H - m - th;
+  if (caption) {
+    x = (W - tw) / 2;
+    y = H - m - th;
+  } else if (ps.clock_pos == "bottom_left") {
+    x = m;
+  } else if (ps.clock_pos == "top_right") {
+    y = m;
+  } else if (ps.clock_pos == "top_left") {
+    x = m;
+    y = m;
+  }
+  g_ph.overlay = {std::max(0, x - 24), std::max(0, y - 16), std::min(W, tw + 48), std::min(H, th + 32)};
+  d.startWrite();
+  if (caption) d.fillRoundRect(g_ph.overlay.x, g_ph.overlay.y, g_ph.overlay.w, g_ph.overlay.h, 14, 0x0841);
+  d.setTextDatum(top_left);
+  d.setTextColor(TFT_BLACK);
+  for (int dx = -2; dx <= 2; dx += 2)
+    for (int dy = -2; dy <= 2; dy += 2)
+      if (dx || dy) d.drawString(text.c_str(), x + dx, y + dy);
+  d.setTextColor(TFT_WHITE);
+  d.drawString(text.c_str(), x, y);
+  d.endWrite();
+  d.setTextSize(1);
+}
+
+// Shows a new photo with the chosen transition. Returns false if it could not be read.
+bool presentPhoto(PanelSurface &surf, const std::string &rel, bool first) {
+  const PhotoSettings ps = photoSettings();
+  if (!ensureCanvases(surf.rot)) return false;
+  uint32_t t0 = millis();
+  // One retry: the SD card shares the P4's SDIO host with the Wi-Fi chip, and
+  // a read during heavy Wi-Fi traffic (just after joining) has failed once.
+  if (!decodePhoto(*g_ph.next, rel, ps)) {
+    vTaskDelay(pdMS_TO_TICKS(400));
+    if (!decodePhoto(*g_ph.next, rel, ps)) return false;
+  }
+  g_ph.decode_ms = millis() - t0;
+  t0 = millis();
+  int frames = 0;
+  const std::string tr = first ? "cut" : ps.transition;
+  if (tr == "dissolve" || tr == "slide") {
+    for (;;) {
+      const uint32_t e = millis() - t0;
+      if (e >= (uint32_t)ps.transition_ms) break;
+      const float f = e / (float)ps.transition_ms;
+      const float ease = f * f * (3 - 2 * f);
+      if (tr == "dissolve") showFrame(surf, g_ph.cur, g_ph.next, (int)(ease * 256), 0);
+      else showFrame(surf, g_ph.cur, g_ph.next, 0, std::max(1, (int)(ease * surf.ph)));
+      frames++;
+      vTaskDelay(1);
+    }
+  }
+  showFrame(surf, nullptr, g_ph.next, 256, 0);
+  g_ph.transition_ms = millis() - t0;
+  g_ph.frames = frames;
+  std::swap(g_ph.cur, g_ph.next);
+  g_ph.shown = rel;
+  g_ph.overlay = {0, 0, 0, 0};
+  drawOverlay(surf, ps);
+  note("photo: %s decoded in %lu ms, %s in %lu ms (%d frames)", rel.c_str(), (unsigned long)g_ph.decode_ms, tr.c_str(),
+       (unsigned long)g_ph.transition_ms, frames);
+  return true;
+}
 
 // Everything the board is drawn from, rebuilt when the layout settings change.
 struct SignState {
@@ -606,7 +996,58 @@ void renderTask(void *) {
     }
     if (!g_was_active) {
       g_was_active = true;
-      redrawAll(st);
+      if (g_mode_req == Mode::Board) redrawAll(st);
+      else if (g_ph.cur) showFrame(st.surf, nullptr, g_ph.cur, 256, 0);
+    }
+    // Photo mode: the board keeps its time underneath; panel taps still work.
+    static Mode mode = Mode::Board;
+    if (g_mode_req != mode) {
+      mode = g_mode_req;
+      if (mode == Mode::Board) {
+        g_ph.shown.clear();
+        redrawAll(st);
+      }
+    }
+    if (mode == Mode::Photo && !g_panel_open && !g_panel_req) {
+      std::string req, cap;
+      bool have = false, have_cap = false;
+      xSemaphoreTake(g_mux, portMAX_DELAY);
+      if (g_photo_pending) {
+        req = g_photo_req;
+        have = true;
+        g_photo_pending = false;
+      }
+      if (g_caption_pending) {
+        cap = g_caption_req;
+        have_cap = true;
+        g_caption_pending = false;
+      }
+      xSemaphoreGive(g_mux);
+      if (have && !presentPhoto(st.surf, req, g_ph.shown.empty())) {
+        note("photo: could not show %s (PNG or baseline JPEG only)", req.c_str());
+        xSemaphoreTake(g_mux, portMAX_DELAY);
+        g_photo_failed = req;
+        g_photo_failed_flag = true;
+        xSemaphoreGive(g_mux);
+      }
+      if (have_cap && cap != g_ph.caption) {
+        g_ph.caption = cap;
+        drawOverlay(st.surf, photoSettings());
+      }
+      struct tm t;
+      if (g_ph.cur && clock::localNow(&t) && t.tm_min != g_ph.last_minute && g_ph.caption.empty()) {
+        const PhotoSettings ps = photoSettings();
+        if (ps.clock) drawOverlay(st.surf, ps);
+        else g_ph.last_minute = t.tm_min;
+      }
+      vTaskDelay(pdMS_TO_TICKS(30));
+      continue;
+    }
+    if (mode == Mode::Photo && (g_panel_open || g_panel_req)) {
+      runPanel(st);   // the sheet over the photo; closing it restores the photo below
+      if (!g_panel_open && g_ph.cur) showFrame(st.surf, nullptr, g_ph.cur, 256, 0), drawOverlay(st.surf, photoSettings());
+      vTaskDelay(pdMS_TO_TICKS(20));
+      continue;
     }
     const int64_t a = esp_timer_get_time();
     st.surf.blit_us = st.surf.sync_us = 0;
@@ -678,6 +1119,35 @@ void openPanel() { g_panel_req = true; }
 bool takeAction(Action *a) { return xQueueReceive(g_actions, a, 0) == pdTRUE; }
 const char *sourceForMode(int i) { return i >= 0 && i < 4 ? kModeSources[i] : "messages"; }
 void setActive(bool active) { g_active = active; }
+
+void showPhoto(const std::string &rel) {
+  xSemaphoreTake(g_mux, portMAX_DELAY);
+  g_photo_req = rel;
+  g_photo_pending = true;
+  g_mode_req = Mode::Photo;
+  xSemaphoreGive(g_mux);
+}
+
+void showBoard() { g_mode_req = Mode::Board; }
+bool photoMode() { return g_mode_req == Mode::Photo; }
+
+void photoCaption(const std::string &text) {
+  xSemaphoreTake(g_mux, portMAX_DELAY);
+  if (text != g_caption_req || !g_caption_pending) {
+    g_caption_req = text;
+    g_caption_pending = true;
+  }
+  xSemaphoreGive(g_mux);
+}
+
+bool takePhotoFailure(std::string *rel) {
+  xSemaphoreTake(g_mux, portMAX_DELAY);
+  const bool f = g_photo_failed_flag;
+  if (f) *rel = g_photo_failed;
+  g_photo_failed_flag = false;
+  xSemaphoreGive(g_mux);
+  return f;
+}
 bool panelOpen() { return g_panel_open; }
 void panelTap(int x, int y) {
   g_tap_y = y;

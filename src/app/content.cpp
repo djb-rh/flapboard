@@ -16,6 +16,7 @@
 #include "clock.h"
 #include "config.h"
 #include "net.h"
+#include "photos.h"
 #include "schedule.h"
 #include "note.h"
 #include "sdcard.h"
@@ -36,6 +37,12 @@ int g_index = -1;              // position in the library (sequential order)
 uint32_t g_next_ms = 0;        // when to move to the next message
 std::string g_shown;           // the expanded text last sent to the board
 std::string g_override;
+std::vector<photos::Photo> g_photos;   // everything under photos/, rescanned when the library changes
+bool g_photos_dirty = true;
+uint32_t g_photos_loaded = 0;
+std::string g_last_photo;
+std::vector<std::string> g_bad_photos;   // failed twice running: skipped until the library changes
+std::string g_failed_once;
 uint32_t g_override_until = 0;
 bool g_override_on = false;
 
@@ -181,6 +188,12 @@ Program readProgram() {
     def.dwell = d["content_dwell"] | 20;
     def.text = d["content_text"] | "";
     for (JsonVariantConst v : d["content_files"].as<JsonArrayConst>()) def.files.push_back(v.as<std::string>());
+    if (def.source == "photos") {   // photo mode keeps its own selection, order and timing
+      def.files.clear();
+      for (JsonVariantConst v : d["photo_selection"].as<JsonArrayConst>()) def.files.push_back(v.as<std::string>());
+      def.order = d["photo_order"] | "random";
+      def.dwell = d["photo_dwell"] | 30;
+    }
     p.clock_tpl = d["clock_template"] | "{time}|{date}";
     p.weather_tpl = d["weather_template"] | "{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}";
     enabled = d["schedule_enabled"] | false;
@@ -244,7 +257,11 @@ void begin() {
   if (sdcard::mounted()) seedLibrary();
 }
 
-void libraryChanged() { g_lib_dirty = true; }
+void libraryChanged() {
+  g_lib_dirty = true;
+  g_photos_dirty = true;
+  g_bad_photos.clear();
+}
 
 void publishStatus();
 void showOverride(const std::string &text, int seconds) {
@@ -252,7 +269,8 @@ void showOverride(const std::string &text, int seconds) {
   g_override_on = true;
   g_override_until = seconds > 0 ? millis() + (uint32_t)seconds * 1000 : 0;
   g_shown.clear();
-  sign::show(expand(text), 1, true);
+  if (sign::photoMode()) sign::photoCaption(expand(text));
+  else sign::show(expand(text), 1, true);
   publishStatus();
 }
 
@@ -266,6 +284,7 @@ std::string overrideText() {
 void clearOverride() {
   g_override_on = false;
   g_shown.clear();
+  if (sign::photoMode()) sign::photoCaption("");
   publishStatus();
 }
 
@@ -289,18 +308,60 @@ void loopInner() {
     g_index = -1;
   }
   if (g_lib_dirty || millis() - g_lib_loaded > 60000) loadLibrary(p.files);
+  const bool photo_program = p.source == "photos";
+  if (!photo_program && sign::photoMode()) {   // back to the board
+    sign::showBoard();
+    g_shown.clear();
+    g_have = false;
+  }
   if (g_override_on) {
     if (g_override_until && (int32_t)(millis() - g_override_until) >= 0) {
       g_override_on = false;
       g_shown.clear();
+      if (sign::photoMode()) sign::photoCaption("");
     } else {
       const std::string t = expand(g_override);   // an override's fields keep ticking too
       if (t != g_shown) {
         g_shown = t;
-        sign::show(t, 1, true);
+        if (sign::photoMode()) sign::photoCaption(t);   // over the photo, not instead of it
+        else sign::show(t, 1, true);
       }
-      return;
+      if (!sign::photoMode()) return;   // in photo mode the slideshow carries on underneath
     }
+  }
+  if (photo_program) {
+    if (g_photos_dirty || millis() - g_photos_loaded > 300000) {
+      g_photos = sdcard::mounted() ? photos::scan(std::string(sdcard::mountPoint()) + "/flapboard") : std::vector<photos::Photo>();
+      g_photos_dirty = false;
+      g_photos_loaded = millis();
+    }
+    std::string failed;
+    if (sign::takePhotoFailure(&failed)) {   // unreadable: straight on to the next; twice running: skip it
+      if (failed == g_failed_once) g_bad_photos.push_back(failed);
+      g_failed_once = failed;
+      g_next_ms = millis();
+    }
+    if (!g_have || (int32_t)(millis() - g_next_ms) >= 0) {
+      auto pool = photos::select(g_photos, p.files);
+      pool.erase(std::remove_if(pool.begin(), pool.end(), [](const photos::Photo &x) {
+                   return std::find(g_bad_photos.begin(), g_bad_photos.end(), x.path) != g_bad_photos.end();
+                 }), pool.end());
+      const std::string next = photos::next(pool, p.order, g_last_photo, esp_random());
+      g_have = true;
+      g_next_ms = millis() + (uint32_t)p.dwell * 1000;
+      if (next.empty()) {   // nothing to show: say so on the board
+        if (sign::photoMode()) sign::showBoard();
+        g_cur = Message{"", "NO PHOTOS YET||ADD THEM AT|{hostname}"};
+        g_shown.clear();
+        push(true);
+      } else {
+        g_last_photo = next;
+        g_cur = Message{next, ""};
+        g_shown = next;
+        sign::showPhoto(next);
+      }
+    }
+    return;
   }
   const bool due = !g_have || (int32_t)(millis() - g_next_ms) >= 0;
   if (due) {
@@ -330,6 +391,7 @@ std::string buildStatus() {
   d["messages"] = (int)g_lib.size();
   d["current"] = g_cur.text;
   d["file"] = g_cur.file;
+  d["photos"] = (int)g_photos.size();
   d["shown"] = g_shown;
   d["override"] = g_override_on;
   d["override_text"] = g_override_on ? g_override : "";

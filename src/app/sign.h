@@ -27,6 +27,14 @@ const char *sourceForMode(int i);
 // Display off (sleep hours, "off" from Home Assistant): stop drawing; on
 // again: redraw everything. The board keeps time meanwhile.
 void setActive(bool active);
+
+// Photo mode (Phase 9): show a library photo ("photos/x.jpg") full screen with
+// the configured transition; the board is set aside until showBoard().
+void showPhoto(const std::string &rel);
+void showBoard();
+bool photoMode();
+void photoCaption(const std::string &text);   // a message over the photo ("" = none)
+bool takePhotoFailure(std::string *rel);      // a photo that could not be read
 bool panelOpen();
 void panelTap(int x, int y);
 

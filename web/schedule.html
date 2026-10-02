@@ -12,7 +12,7 @@ button.mini{padding:5px 9px;font-size:13px}
 .savebar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center}
 </style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/schedule" class="on">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule" class="on">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
 <main><div id="note"></div>
 <section class="card"><h2>Right now</h2>
 <p class="state" id="showing">...</p><p class="state" id="power" style="margin-top:6px">...</p>
@@ -63,8 +63,8 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>({ok:r.ok,d:await r.json()}));
 const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-const SOURCES={messages:'Messages',clock:'The clock',weather:'The weather',text:'One message'};
-let files=[],data={rules:[],overrides:[],sleep:[]},saved='';
+const SOURCES={messages:'Messages',clock:'The clock',weather:'The weather',text:'One message',photos:'Photos'};
+let files=[],photoDirs=[],data={rules:[],overrides:[],sleep:[]},saved='';
 function prog(p){p=p||{};return {source:p.source||'messages',files:p.files||[],order:p.order||'random',dwell:p.dwell||20,text:p.text||''}}
 function ruleHtml(kind,r,i){
   const id=kind+i,p=prog(r.program);
@@ -76,9 +76,12 @@ function ruleHtml(kind,r,i){
   h+='<div><label>From</label><input type="time" data-f="start" value="'+esc(r.start)+'"></div><div><label>Until</label><input type="time" data-f="end" value="'+esc(r.end)+'"></div>';
   if(kind!=='sleep'){h+='<div><label>Show</label><select data-p="source">'+Object.entries(SOURCES).map(([k,v])=>'<option value="'+k+'"'+(p.source===k?' selected':'')+'>'+v+'</option>').join('')+'</select></div>';
     h+='<div data-only="messages"><label>Order</label><select data-p="order"><option value="random"'+(p.order==='random'?' selected':'')+'>Random</option><option value="sequential"'+(p.order==='sequential'?' selected':'')+'>In file order</option></select></div>';
+    h+='<div data-only="photos"><label>Order</label><select data-p="porder">'+[['random','Random'],['name_asc','By name'],['date_desc','Newest first'],['date_asc','Oldest first']].map(([v,t])=>'<option value="'+v+'"'+(p.order===v?' selected':'')+'>'+t+'</option>').join('')+'</select></div>';
+    h+='<div data-only="photos"><label>Seconds each</label><input type="number" min="5" data-p="pdwell" value="'+p.dwell+'"></div>';
     h+='<div data-only="messages"><label>Seconds each</label><input type="number" min="3" data-p="dwell" value="'+p.dwell+'"></div></div>';
     h+='<div data-only="messages"><label>Files (none = all)</label><div class="files">'+files.map(f=>'<label><input type="checkbox" data-file="'+esc(f)+'"'+(p.files.includes(f)?' checked':'')+'>'+esc(f)+'</label>').join('')+'</div></div>';
     h+='<div data-only="text"><label>Message</label><input data-p="text" value="'+esc(p.text)+'"></div>';
+    h+='<div data-only="photos"><label>Photo folders (none = all)</label><div class="files">'+photoDirs.map(f=>'<label><input type="checkbox" data-pdir="'+esc(f)+'"'+(p.files.includes(f)?' checked':'')+'>'+esc(f.replace(/^photos\//,''))+'</label>').join('')+'</div></div>';
   }else h+='</div>';
   if(kind!=='sleep')h+='<p class="hint">Leave both times empty for all day.</p>';
   return h+'</div>'}
@@ -88,7 +91,9 @@ function render(){for(const k of ['rules','overrides','sleep'])$('#'+k).innerHTM
 function collect(){for(const k of ['rules','overrides','sleep']){data[k]=[...document.querySelectorAll('.rule[data-kind='+k+']')].map(el=>{
   const r={name:el.querySelector('[data-f=name]').value.trim(),start:el.querySelector('[data-f=start]').value,end:el.querySelector('[data-f=end]').value};
   if(k==='overrides')r.date=el.querySelector('[data-f=date]').value;else r.days=[...el.querySelectorAll('[data-day]:checked')].map(c=>+c.dataset.day);
-  if(k!=='sleep'){const g=n=>el.querySelector('[data-p='+n+']').value;r.program={source:g('source'),order:g('order'),dwell:+g('dwell')||20,text:g('text'),files:[...el.querySelectorAll('[data-file]:checked')].map(c=>c.dataset.file)}}
+  if(k!=='sleep'){const g=n=>el.querySelector('[data-p='+n+']').value;const src=g('source');
+    r.program=src==='photos'?{source:src,order:g('porder'),dwell:+g('pdwell')||30,files:[...el.querySelectorAll('[data-pdir]:checked')].map(c=>c.dataset.pdir)}
+      :{source:src,order:g('order'),dwell:+g('dwell')||20,text:g('text'),files:[...el.querySelectorAll('[data-file]:checked')].map(c=>c.dataset.file)}}
   return r})}}
 function body(){collect();return {schedule_enabled:$('#schedule_enabled').checked,schedule_rules:data.rules,schedule_overrides:data.overrides,sleep_enabled:$('#sleep_enabled').checked,sleep_rules:data.sleep,
   brightness:+$('#brightness').value,tap_wake_minutes:+$('#tap_wake_minutes').value,
@@ -125,6 +130,7 @@ async function status(){try{const s=await (await fetch('/api/status')).json();$(
   $('#relaystate').textContent=p.relay_pin<0?'No relay set.':'Relay on G'+p.relay_pin+' is '+(p.relay_on?'on':'off')+'.'}catch(e){}}
 (async()=>{const c=await (await fetch('/api/config')).json();
   try{const d=await (await fetch('/library/list?path=messages')).json();files=d.entries.filter(e=>!e.dir&&/\.txt$/i.test(e.name)).map(e=>e.name)}catch(e){}
+  try{const d=await (await fetch('/library/list?path=photos')).json();photoDirs=d.entries.filter(e=>e.type==='dir').map(e=>e.path)}catch(e){}
   data={rules:c.schedule_rules||[],overrides:c.schedule_overrides||[],sleep:c.sleep_rules||[]};
   $('#schedule_enabled').checked=c.schedule_enabled;$('#sleep_enabled').checked=c.sleep_enabled;$('#brightness').value=c.brightness;$('#tap_wake_minutes').value=c.tap_wake_minutes;
   $('#motion_enabled').checked=c.motion_enabled;$('#motion_timeout').value=c.motion_timeout;$('#motion_threshold').value=c.motion_threshold;$('#motion_area').value=c.motion_area;

@@ -41,8 +41,9 @@ struct Command {
 };
 QueueHandle_t g_cmds;
 
-const char *const kShowNames[] = {"Messages", "Clock", "Weather", "Fixed message"};
-const char *const kShowSources[] = {"messages", "clock", "weather", "text"};
+const char *const kShowNames[] = {"Messages", "Clock", "Weather", "Fixed message", "Photos"};
+const char *const kShowSources[] = {"messages", "clock", "weather", "text", "photos"};
+constexpr int kShows = 5;
 
 std::string uid() {
   const uint64_t mac = ESP.getEfuseMac();
@@ -302,7 +303,7 @@ void handle(const Command &c) {
     if (text.empty()) content::clearOverride();
     else content::showOverride(text, seconds);
   } else if (t == "show/set") {
-    for (int i = 0; i < 4; i++)
+    for (int i = 0; i < kShows; i++)
       if (v == kShowNames[i]) applyConfig("content_source", kShowSources[i]);
   } else if (t == "volume/set") {
     sound::setVolume(atoi(v.c_str()), true);
@@ -324,7 +325,7 @@ void publishState(bool force) {
     brightness = r.doc()["brightness"] | 80;
   }
   const char *show = "Messages";
-  for (int i = 0; i < 4; i++)
+  for (int i = 0; i < kShows; i++)
     if (source == kShowSources[i]) show = kShowNames[i];
   JsonDocument p;
   deserializeJson(p, power::statusJson());

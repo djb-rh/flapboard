@@ -78,7 +78,16 @@ constexpr const char *kDefaults = R"JSON({
   "motion_enabled": false,
   "motion_timeout": 10,
   "motion_threshold": 14,
-  "motion_area": 1.5
+  "motion_area": 1.5,
+  "photo_selection": [],
+  "photo_order": "random",
+  "photo_dwell": 30,
+  "photo_transition": "dissolve",
+  "photo_transition_ms": 700,
+  "photo_fit": "contain",
+  "photo_blur": true,
+  "photo_clock": false,
+  "photo_clock_pos": "bottom_right"
 })JSON";
 
 JsonDocument g_doc;

@@ -17,7 +17,8 @@ void loop();
 void flip(uint32_t at_ms);        // the render task: a flap lands at board time at_ms
 void reloadClips();
 // Volume 0-100 and on/off, applied at once and saved (debounced) to the
-// settings. preview: play a short burst so the level can be heard.
+// settings. preview: play a short burst so the level can be heard. Setting
+// the volume also unmutes.
 void setVolume(int volume, bool preview = true);
 void setEnabled(bool enabled);
 int volume();

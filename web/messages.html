@@ -11,12 +11,12 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 .hint{font-size:13px;color:var(--dim);margin:6px 0 0}
 </style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages" class="on">Messages</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages" class="on">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
 <main><div id="note"></div>
 <section class="card"><h2>On the sign now</h2><pre class="now" id="now">...</pre><p class="hint" id="nowinfo"></p></section>
 
 <section class="card"><h2>What to show</h2><div class="grid2">
-<div><label for="content_source">Show</label><select id="content_source"><option value="messages">Messages from the library</option><option value="clock">The clock</option><option value="weather">The weather</option><option value="text">One fixed message</option></select></div>
+<div><label for="content_source">Show</label><select id="content_source"><option value="messages">Messages from the library</option><option value="clock">The clock</option><option value="weather">The weather</option><option value="text">One fixed message</option><option value="photos">Photos (set up on the Photos page)</option></select></div>
 <div><label for="content_order">Order</label><select id="content_order"><option value="random">Random</option><option value="sequential">In file order</option></select></div>
 <div><label for="content_dwell">Seconds per message</label><input id="content_dwell" type="number" min="3" max="3600"></div>
 </div>

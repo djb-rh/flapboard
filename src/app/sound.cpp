@@ -240,6 +240,7 @@ void loop() { saveIfDue(); }
 
 void setVolume(int volume, bool preview) {
   g_volume = volume < 0 ? 0 : volume > 100 ? 100 : volume;
+  g_enabled = true;   // changing the volume while muted means "I want to hear it"
   g_mix.setVolume(g_volume / 100.0f);
   g_save_at = millis() + 2000;   // one write after the last tap, not one per tap
   if (preview && g_enabled) {

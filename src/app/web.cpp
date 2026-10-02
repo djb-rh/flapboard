@@ -364,6 +364,7 @@ esp_err_t handleSchedulePage(httpd_req_t *req) { return sendAsset(req, "/schedul
 
 esp_err_t handleMessagesPage(httpd_req_t *req) { return sendAsset(req, "/messages.html"); }
 esp_err_t handleClockPage(httpd_req_t *req) { return sendAsset(req, "/clock.html"); }
+esp_err_t handlePhotosPage(httpd_req_t *req) { return sendAsset(req, "/photos.html"); }
 
 // Volume: {"volume": 0-100} and/or {"enabled": bool}; applied at once.
 esp_err_t handleVolume(httpd_req_t *req) {
@@ -473,13 +474,35 @@ esp_err_t handleLibDownload(httpd_req_t *req) {
   return httpd_resp_send_chunk(req, nullptr, 0);
 }
 
-// Thumbnails arrive with photo mode (Phase 9); until then the page shows an icon.
-esp_err_t handleLibThumb(httpd_req_t *req) { return sendError(req, 404, "no thumbnail available"); }
+// A photo's thumbnail lives beside it in a hidden .thumbs folder (made by the
+// browser at upload time, so the Tab5 never scales a 12 MP photo itself).
+std::string thumbOf(const std::string &abs) {
+  const size_t s = abs.rfind('/');
+  return abs.substr(0, s) + "/.thumbs/" + abs.substr(s + 1);
+}
+
+esp_err_t handleLibThumb(httpd_req_t *req) {
+  std::string abs;
+  if (library::resolve(query(req, "path"), &abs) != library::Err::Ok) return sendError(req, 400, "path not allowed");
+  FILE *f = fopen(thumbOf(abs).c_str(), "rb");
+  if (!f) return sendError(req, 404, "no thumbnail available");
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Cache-Control", "max-age=3600");
+  size_t n;
+  while ((n = fread(g_buf, 1, kChunk, f)) > 0)
+    if (httpd_resp_send_chunk(req, g_buf, n) != ESP_OK) {
+      fclose(f);
+      return ESP_FAIL;
+    }
+  fclose(f);
+  return httpd_resp_send_chunk(req, nullptr, 0);
+}
 
 // Streams each file part to a hidden temp file in the destination folder,
 // then renames it to a name that collides with nothing ("beach (2).jpg").
 struct UploadSink : MultipartParser::Handler {
   std::string field, field_value, dest_rel;
+  bool thumb = false;   // field thumb=1: this file is a thumbnail for <dest>/<name>
   bool in_file = false;
   FILE *f = nullptr;
   std::string tmp, dest_dir, filename;
@@ -508,6 +531,10 @@ struct UploadSink : MultipartParser::Handler {
     struct stat st;
     if (stat(dest_dir.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
       return setErr(404, "destination folder does not exist");
+    if (thumb) {
+      dest_dir += "/.thumbs";
+      mkdir(dest_dir.c_str(), 0777);
+    }
     char t[48];
     snprintf(t, sizeof(t), "/.upload-%lu.part", (unsigned long)millis());
     tmp = dest_dir + t;
@@ -529,12 +556,23 @@ struct UploadSink : MultipartParser::Handler {
   bool partEnd() override {
     if (!in_file) {
       if (field == "path") dest_rel = library::normalise(field_value);
+      if (field == "thumb") thumb = field_value == "1";
       return true;
     }
     fclose(f);
     f = nullptr;
     in_file = false;
     std::string final_abs;
+    if (thumb) {   // a thumbnail replaces the old one of that name
+      final_abs = dest_dir + "/" + filename;
+      remove(final_abs.c_str());
+      if (rename(tmp.c_str(), final_abs.c_str()) != 0) {
+        remove(tmp.c_str());
+        return setErr(500, "could not save the thumbnail");
+      }
+      saved.push_back(library::relativeOf(final_abs));
+      return true;
+    }
     if (library::uniqueDestination(dest_dir, filename, &final_abs) != library::Err::Ok ||
         rename(tmp.c_str(), final_abs.c_str()) != 0) {
       remove(tmp.c_str());
@@ -589,7 +627,7 @@ esp_err_t handleLibUpload(httpd_req_t *req) {
   for (auto &s : sink.saved) {
     note("upload: %s", s.c_str());
     if (s.rfind("sounds/", 0) == 0) sound::reloadClips();   // a new clack takes effect at once
-    if (s.rfind("messages/", 0) == 0) content::libraryChanged();
+    if (s.rfind("messages/", 0) == 0 || s.rfind("photos/", 0) == 0) content::libraryChanged();
   }
   return sendJson(req, 200, j + "]}");
 }
@@ -609,12 +647,20 @@ esp_err_t handleLibOp(httpd_req_t *req) {
     e = library::makeDir(path, name, &out);
     reply = "{\"created\":" + library::jsonStr(out) + "}";
   } else if (uri.rfind("/library/delete", 0) == 0) {
+    std::string abs;
+    if (library::resolve(path, &abs) == library::Err::Ok) remove(thumbOf(abs).c_str());   // its thumbnail, if any
     e = library::remove(path);
     if (e == library::Err::Ok && library::normalise(path).rfind("sounds", 0) == 0) sound::reloadClips();
-    if (e == library::Err::Ok && library::normalise(path).rfind("messages", 0) == 0) content::libraryChanged();
+    if (e == library::Err::Ok && (library::normalise(path).rfind("messages", 0) == 0 || library::normalise(path).rfind("photos", 0) == 0))
+      content::libraryChanged();
     reply = "{\"deleted\":" + library::jsonStr(path) + "}";
   } else {
+    std::string old_abs;
+    library::resolve(path, &old_abs);
     e = library::rename(path, name, &out);
+    std::string new_abs;
+    if (e == library::Err::Ok && library::resolve(out, &new_abs) == library::Err::Ok)
+      rename(thumbOf(old_abs).c_str(), thumbOf(new_abs).c_str());   // the thumbnail follows
     reply = "{\"renamed\":" + library::jsonStr(out) + "}";
   }
   if (e != library::Err::Ok) return sendError(req, httpCode(e), library::errText(e));
@@ -668,6 +714,7 @@ void begin() {
       {"/api/motion/snapshot", HTTP_GET, handleMotionSnapshot},
       {"/api/power", HTTP_POST, handlePower},
       {"/clock", HTTP_GET, handleClockPage},
+      {"/photos", HTTP_GET, handlePhotosPage},
       {"/api/volume", HTTP_POST, handleVolume},
       {"/api/reboot", HTTP_POST, handleReboot},
       {"/api/c6update", HTTP_POST, handleCoprocUpdate},

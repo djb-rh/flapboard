@@ -14,15 +14,19 @@
 .item .acts button.del{color:var(--bad)}
 .empty{padding:36px 12px;text-align:center;color:var(--dim)}
 .prog{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin:0 0 12px;display:none}.prog i{display:block;height:100%;background:var(--accent);width:0}
+body.dragging #filecard{outline:3px dashed var(--accent);outline-offset:4px}
+#dropmsg{display:none;text-align:center;padding:10px;margin:0 0 12px;border-radius:8px;background:var(--panel2);color:var(--text)}
+body.dragging #dropmsg{display:block}
 #progtxt{font-size:13px;color:var(--dim);margin:-6px 0 12px;display:none}
 </style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
 <nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library" class="on">Files</a></nav></div></header>
-<main><section class="card">
+<main><section class="card" id="filecard">
 <div class="crumbs" id="crumbs"></div>
+<div id="dropmsg">Drop files or folders to upload them here</div>
 <div id="note"></div>
 <div class="prog" id="prog"><i id="progbar"></i></div><div id="progtxt"></div>
-<div class="row" style="margin:0 0 14px"><button id="up">Upload files</button><button class="sec" id="mkdir">New folder</button><span class="space" id="space"></span></div>
+<div class="row" style="margin:0 0 14px"><button id="up">Upload files</button><button class="sec" id="mkdir">New folder</button><span class="hint" style="margin:0">or drag files and folders here</span><span class="space" id="space"></span></div>
 <label id="shrinkrow" style="display:flex;gap:8px;align-items:center;margin:-6px 0 12px;color:var(--text);font-size:14px" hidden><input type="checkbox" id="shrink" checked style="width:auto"> Shrink photos to the screen's size while uploading (recommended: faster, and iPhone HEIC photos work)</label>
 <input type="file" id="picker" multiple style="display:none">
 <div id="list"></div>
@@ -67,7 +71,7 @@ async function go(path){cwd=path||'';
     if(!r.ok){note('err',d.error||'Could not open folder');return}render(d)}catch(e){note('err','Could not reach the sign')}}
 function icon(e){if(e.type==='dir')return'&#128193;';if(e.is_image)return'&#128247;';
   const x=e.name.toLowerCase().split('.').pop();return x==='txt'?'&#128221;':x==='wav'?'&#127925;':(x==='ttf'||x==='otf')?'&#128288;':'&#128196;'}
-function inPhotos(){return cwd==='photos'||cwd.startsWith('photos/')}
+function inPhotos(p){p=p==null?cwd:p;return p==='photos'||p.startsWith('photos/')}
 function render(d){cwd=d.path||'';$('#crumbs').innerHTML=crumbs(cwd);$('#shrinkrow').hidden=!inPhotos();
   const sp=$('#space');sp.textContent=d.total_bytes?size(d.free_bytes)+' free':'';sp.className='space'+(d.low_space?' low':'');
   if(!d.entries.length){$('#list').innerHTML='<div class="empty">This folder is empty.<br>Use <b>Upload files</b> to add some.</div>';return}
@@ -123,7 +127,7 @@ async function putInPieces(folder,name,blob,onProgress,thumb){
     if(!ok)return{ok:false,data:last||{error:'connection lost'},status:0};
     off+=body.size;if(onProgress)onProgress(total?off/total:1)}while(off<total);
   return{ok:true,data:last,status:200}}
-function sendOne(f,buf,onProgress,thumb){return putInPieces(cwd,f.name,new Blob([buf],{type:f.type||'application/octet-stream'}),onProgress,thumb)}
+function sendOne(f,buf,onProgress,thumb,dir){return putInPieces(dir==null?cwd:dir,f.name,new Blob([buf],{type:f.type||'application/octet-stream'}),onProgress,thumb)}
 function sendOneMultipart(f,buf,onProgress,thumb){return new Promise(resolve=>{
   const fd=new FormData();fd.append('path',cwd);if(thumb)fd.append('thumb','1');fd.append('file',new Blob([buf],{type:f.type||'application/octet-stream'}),f.name);
   const x=new XMLHttpRequest();x.open('POST','/library/upload');x.timeout=120000;
@@ -136,31 +140,58 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // Tab5's Wi-Fi link is never asked to take two streams at once, and a file
 // that fails over a dropped connection is retried (twice, with a pause)
 // instead of failing the batch.
-$('#picker').onchange=async function(){
-  const files=[...this.files];if(!files.length)return;
+// items: [{file, dir}] -- dir is the folder it goes into (a dropped folder
+// keeps its structure under the current one).
+async function uploadFiles(items){
+  if(!items.length)return;
   const prog=$('#prog'),bar=$('#progbar'),txt=$('#progtxt');prog.style.display=txt.style.display='block';bar.style.width='0';$('#up').disabled=true;
-  let saved=0,skipped=[],failed=[];
-  for(let i=0;i<files.length;i++){const f=files[i],base=i/files.length;
-    txt.textContent='Uploading '+(i+1)+' of '+files.length+': '+f.name;
+  let saved=0,skipped=[],failed=[];const made=new Set();
+  for(let i=0;i<items.length;i++){const f=items[i].file,dir=items[i].dir,base=i/items.length;
+    // folders first, one level at a time (an existing folder is fine)
+    let acc=cwd;for(const part of dir.slice(cwd.length).split('/').filter(Boolean)){const parent=acc;acc=acc?acc+'/'+part:part;
+      if(!made.has(acc)){made.add(acc);await post('/library/mkdir',{path:parent,name:part}).catch(()=>{})}}
+    txt.textContent='Uploading '+(i+1)+' of '+items.length+': '+f.name;
     let res=null;
     try{let up=f,buf,thumb=null;
       const isImg=/^image\//.test(f.type)||/\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name);
-      if(inPhotos()&&$('#shrink').checked&&isImg){txt.textContent='Shrinking '+f.name+'...';const sp=await shrinkPhoto(f);
+      if(inPhotos(dir)&&$('#shrink').checked&&isImg){txt.textContent='Shrinking '+f.name+'...';const sp=await shrinkPhoto(f);
         if(sp){up={name:sp.name,type:'image/jpeg'};buf=await sp.main.arrayBuffer();thumb=sp.thumb}}
       if(!buf)buf=await readFile(f);
-      txt.textContent='Uploading '+(i+1)+' of '+files.length+': '+up.name;
-      res=await sendOne(up,buf,fr=>bar.style.width=((base+fr/files.length)*100)+'%');   // pieces retry themselves
+      txt.textContent='Uploading '+(i+1)+' of '+items.length+': '+up.name;
+      res=await sendOne(up,buf,fr=>bar.style.width=((base+fr/items.length)*100)+'%',false,dir);   // pieces retry themselves
       if(res.ok&&thumb&&res.data.saved&&res.data.saved[0]){   // its thumbnail, under the name it was saved as
-        const saved=res.data.saved[0].split('/').pop();await sendOne({name:saved,type:'image/jpeg'},await thumb.arrayBuffer(),()=>{},true)}
+        const saved=res.data.saved[0].split('/').pop();await sendOne({name:saved,type:'image/jpeg'},await thumb.arrayBuffer(),()=>{},true,dir)}
     }catch(e){res={ok:false,data:{error:'unreadable'},status:0}}
     if(res.ok){saved+=(res.data.saved||[]).length;skipped=skipped.concat(res.data.skipped||[])}
     else failed.push(f.name+' ('+(res.data.error||res.status)+')');
-    bar.style.width=(((i+1)/files.length)*100)+'%'}
-  prog.style.display=txt.style.display='none';$('#up').disabled=false;this.value='';
+    bar.style.width=(((i+1)/items.length)*100)+'%'}
+  prog.style.display=txt.style.display='none';$('#up').disabled=false;
   const parts=[];if(saved)parts.push(saved+' file'+(saved===1?'':'s')+' uploaded.');
   if(skipped.length)parts.push('Skipped '+skipped.length+' (names starting with a dot are not allowed).');
   if(failed.length)parts.push('Failed: '+failed.join(', ')+'.');
-  note(failed.length?'err':'ok',parts.join(' ')||'Nothing to upload.');go(cwd)};
+  note(failed.length?'err':'ok',parts.join(' ')||'Nothing to upload.');go(cwd)}
+$('#picker').onchange=function(){const files=[...this.files];this.value='';uploadFiles(files.map(file=>({file,dir:cwd})))};
+
+// Drag and drop anywhere on the page. Folders are walked (webkitGetAsEntry,
+// which Safari, Chrome, Edge and Firefox all have); hidden files are left out.
+function walk(entry,dir,out){return new Promise(resolve=>{
+  if(entry.name.startsWith('.'))return resolve();
+  if(entry.isFile)entry.file(file=>{out.push({file,dir});resolve()},()=>resolve());
+  else if(entry.isDirectory){const sub=dir?dir+'/'+entry.name:entry.name,r=entry.createReader(),all=[];
+    const more=()=>r.readEntries(async es=>{if(es.length){all.push(...es);more()}else{for(const e of all)await walk(e,sub,out);resolve()}},()=>resolve());more()}
+  else resolve()})}
+let dragDepth=0;
+const canDrop=e=>e.dataTransfer&&[...e.dataTransfer.types].includes('Files')&&!$('#up').disabled;
+document.addEventListener('dragenter',e=>{if(!canDrop(e))return;e.preventDefault();if(++dragDepth===1)document.body.classList.add('dragging')});
+document.addEventListener('dragover',e=>{if(!canDrop(e))return;e.preventDefault();e.dataTransfer.dropEffect='copy'});
+document.addEventListener('dragleave',e=>{if(dragDepth&&--dragDepth===0)document.body.classList.remove('dragging')});
+document.addEventListener('drop',async e=>{if(!e.dataTransfer)return;e.preventDefault();dragDepth=0;document.body.classList.remove('dragging');
+  if($('#up').disabled)return;
+  const entries=[...e.dataTransfer.items].filter(i=>i.kind==='file').map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry());
+  const out=[];
+  if(entries.length&&entries.every(Boolean)){for(const en of entries)await walk(en,cwd,out)}
+  else for(const file of e.dataTransfer.files)out.push({file,dir:cwd});
+  uploadFiles(out)});
 fetch('/api/status').then(r=>r.json()).then(s=>{$('#name').textContent=s.device_name}).catch(()=>{});
 sdCheck().then(ok=>{if(ok)go('')});
 </script></body></html>

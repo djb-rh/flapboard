@@ -122,13 +122,37 @@ void space(uint64_t *free_b, uint64_t *total_b) {
 }
 
 bool formatWholeCard() {
-  // A card that doesn't mount (not FAT) still needs a handle: mount with
-  // format_if_mount_failed, which formats it once; then format properly.
+  // A card that doesn't mount (exFAT, NTFS, blank) is mounted here with
+  // format_if_mount_failed and a 32 KB allocation unit, so it is formatted
+  // once, properly. (SD_MMC's own format_if_mount_failed uses the smallest
+  // clusters: a ~2 GB FAT on a 128 GB card, minutes of writing, and then it
+  // still needed formatting again.)
   if (!g_mounted) {
-    pins(true);
-    if (!SD_MMC.begin(kMount, false, true, 20000)) return false;
-    g_mounted = true;
-    g_width = "4-bit";
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.slot = SDMMC_HOST_SLOT_0;   // the Tab5's slot: IO-MUX pins, as SD_MMC sets it up
+    host.flags = SDMMC_HOST_FLAG_4BIT;
+    host.max_freq_khz = 20000;
+    sdmmc_slot_config_t slot = {};
+    slot.cd = SDMMC_SLOT_NO_CD;
+    slot.wp = SDMMC_SLOT_NO_WP;
+    slot.width = 4;
+    esp_vfs_fat_sdmmc_mount_config_t mc = {};
+    mc.max_files = 5;
+    mc.allocation_unit_size = 32 * 1024;
+    sdmmc_card_t *card = nullptr;
+    esp_err_t e = esp_vfs_fat_sdmmc_mount(kMount, &host, &slot, &mc, &card);
+    if (e == ESP_FAIL) {   // the card answered but has no FAT volume: format it now
+      mc.format_if_mount_failed = true;
+      e = esp_vfs_fat_sdmmc_mount(kMount, &host, &slot, &mc, &card);
+      if (e != ESP_OK) return false;
+      esp_vfs_fat_sdcard_unmount(kMount, card);
+      return begin();
+    }
+    if (e != ESP_OK) return false;   // no card
+    // It mounted after all (a FAT that SD_MMC's attempt didn't take): format below.
+    e = esp_vfs_fat_sdcard_format_cfg(kMount, card, &mc);
+    esp_vfs_fat_sdcard_unmount(kMount, card);
+    return e == ESP_OK && begin();
   }
   esp_vfs_fat_mount_config_t cfg = {};
   cfg.max_files = 5;

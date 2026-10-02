@@ -62,11 +62,17 @@ void formatCardIfAsked() {
   if (asked) p.remove("sd_format");   // cleared first: a failed format must not loop
   p.end();
   if (!asked) return;
+  {
+    config::Reader r;   // landscape like the sign (sign.cpp picks the same rotation)
+    M5.Display.setRotation(std::string(r.doc()["orientation"] | "landscape") == "landscape_flipped" ? 1 : 3);
+  }
   M5.Display.fillScreen(TFT_BLACK);
   M5.Display.setTextColor(TFT_WHITE);
   M5.Display.setTextDatum(middle_center);
   M5.Display.setFont(&fonts::DejaVu40);
-  M5.Display.drawString("Formatting the SD card...", M5.Display.width() / 2, M5.Display.height() / 2);
+  M5.Display.drawString("Formatting the SD card...", M5.Display.width() / 2, M5.Display.height() / 2 - 30);
+  M5.Display.setFont(&fonts::DejaVu24);
+  M5.Display.drawString("About a minute. Don't switch off.", M5.Display.width() / 2, M5.Display.height() / 2 + 30);
   note("sd: formatting the whole card (FAT32), asked from the web page");
   const bool ok = sdcard::formatWholeCard();
   note("sd: format %s", ok ? "done" : "FAILED");

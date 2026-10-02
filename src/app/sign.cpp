@@ -9,6 +9,8 @@
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/queue.h>
+#include <ArduinoJson.h>
 
 #include <algorithm>
 #include <cmath>
@@ -29,6 +31,7 @@
 #include "net.h"
 #include "note.h"
 #include "sdcard.h"
+#include "status.h"
 #include "sound.h"
 
 namespace flapboard {
@@ -251,50 +254,131 @@ struct Button {
   int x, y, w, h;
   bool hit(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
 };
-const Button kPanel{240, 110, 800, 500};
-const Button kMinus{290, 290, 150, 150}, kPlus{840, 290, 150, 150};
-const Button kMute{290, 480, 330, 96}, kClose{660, 480, 330, 96};
+// The info sheet (long press anywhere): the address and a QR code to the web
+// page, how the sign is doing, and the controls people reach for. 80 px+
+// targets (Tabulous5: ~294 PPI).
+const Button kPanel{40, 28, 1200, 664};
+const Button kVolDown{700, 128, 110, 96}, kVolUp{1090, 128, 110, 96};
+const Button kBriDown{700, 262, 110, 96}, kBriUp{1090, 262, 110, 96};
+const Button kModes[4] = {{700, 410, 118, 96}, {828, 410, 118, 96}, {956, 410, 118, 96}, {1084, 410, 116, 96}};
+const char *const kModeLabels[4] = {"Messages", "Clock", "Weather", "Photos"};
+const char *const kModeSources[4] = {"messages", "clock", "weather", "photos"};
+const Button kMute{700, 560, 118, 96}, kNext{828, 560, 118, 96}, kShowIp{956, 560, 118, 96}, kClose{1084, 560, 116, 96};
+
+// Settings changes go to the main loop: this task's stack is in PSRAM and
+// must never write flash.
+QueueHandle_t g_actions = xQueueCreate(8, sizeof(Action));
+volatile uint32_t g_redraw_at = 0;
+
+void post(ActionKind k, int arg) {
+  Action a{k, arg};
+  xQueueSend(g_actions, &a, 0);
+  g_redraw_at = millis() + 350;   // show the result once the main loop has applied it
+}
 
 void drawButton(const Button &b, const char *label, uint16_t bg, uint16_t fg, const lgfx::IFont *font) {
   auto &d = M5.Display;
-  d.fillRoundRect(b.x, b.y, b.w, b.h, 18, bg);
+  d.fillRoundRect(b.x, b.y, b.w, b.h, 16, bg);
   d.setFont(font);
   d.setTextColor(fg, bg);
   d.setTextDatum(middle_center);
   d.drawString(label, b.x + b.w / 2, b.y + b.h / 2);
 }
 
-void drawPanel() {
+void drawLevel(const char *label, int value, bool on, const Button &down, const Button &up) {
   auto &d = M5.Display;
   const uint16_t panel = 0x2124, ink = 0xF79E, dim = 0xA534, accent = 0xEC20, btn = 0x39C7;
-  d.startWrite();
-  d.fillRoundRect(kPanel.x, kPanel.y, kPanel.w, kPanel.h, 26, panel);
-  d.setTextDatum(top_left);
-  d.setFont(&lgfx::fonts::FreeSansBold18pt7b);
-  d.setTextColor(ink, panel);
-  const std::string ip = net::ip();
-  d.drawString((config::hostname() + ".local").c_str(), kPanel.x + 50, kPanel.y + 36);
   d.setFont(&lgfx::fonts::FreeSans12pt7b);
+  d.setTextDatum(bottom_left);
   d.setTextColor(dim, panel);
-  d.drawString((ip.empty() ? std::string("Wi-Fi: ") + net::statusText() : "http://" + ip + "/").c_str(), kPanel.x + 50,
-               kPanel.y + 90);
-  d.drawString("VOLUME", kPanel.x + 50, kPanel.y + 140);
-  drawButton(kMinus, "-", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
-  drawButton(kPlus, "+", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
-  // The level: a bar between the buttons, with the number on it.
-  const int bx = kMinus.x + kMinus.w + 40, bw = kPlus.x - 40 - bx, by = kMinus.y + 45, bh = 60;
-  const bool on = sound::enabled();
-  const int v = sound::volume();
+  d.drawString(label, down.x, down.y - 8);
+  drawButton(down, "-", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
+  drawButton(up, "+", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
+  const int bx = down.x + down.w + 18, bw = up.x - 18 - bx, by = down.y + 20, bh = down.h - 40;
   d.fillRoundRect(bx, by, bw, bh, 12, 0x18E3);
-  if (on && v > 0) d.fillRoundRect(bx, by, std::max(24, bw * v / 100), bh, 12, accent);
+  if (on && value > 0) d.fillRoundRect(bx, by, std::max(24, bw * value / 100), bh, 12, accent);
   d.setFont(&lgfx::fonts::FreeSansBold18pt7b);
   d.setTextDatum(middle_center);
   d.setTextColor(ink);
   char t[16];
-  snprintf(t, sizeof(t), on ? "%d%%" : "MUTED", v);
+  snprintf(t, sizeof(t), on ? "%d%%" : "MUTED", value);
   d.drawString(t, bx + bw / 2, by + bh / 2);
-  drawButton(kMute, on ? "Mute" : "Unmute", on ? btn : accent, ink, &lgfx::fonts::FreeSansBold18pt7b);
-  drawButton(kClose, "Close", btn, ink, &lgfx::fonts::FreeSansBold18pt7b);
+}
+
+void drawPanel() {
+  auto &d = M5.Display;
+  const uint16_t panel = 0x2124, ink = 0xF79E, dim = 0xA534, accent = 0xEC20, btn = 0x39C7, good = 0x5E8B, warn = 0xF5A0;
+  JsonDocument st;
+  deserializeJson(st, status::json());
+  d.startWrite();
+  d.fillRoundRect(kPanel.x, kPanel.y, kPanel.w, kPanel.h, 26, panel);
+  const int lx = kPanel.x + 44;
+  // The address: big, readable from across the room, and a QR code for phones.
+  d.setTextDatum(top_left);
+  d.setFont(&lgfx::fonts::FreeSansBold24pt7b);
+  d.setTextColor(ink, panel);
+  d.drawString(config::deviceName().c_str(), lx, kPanel.y + 30);
+  const std::string ip = net::ip();
+  d.setFont(&lgfx::fonts::FreeSansBold18pt7b);
+  d.setTextColor(accent, panel);
+  d.drawString((config::hostname() + ".local").c_str(), lx, kPanel.y + 92);
+  d.setFont(&lgfx::fonts::FreeSans18pt7b);
+  d.setTextColor(ink, panel);
+  d.drawString(ip.empty() ? ("Wi-Fi: " + net::statusText()).c_str() : ("http://" + ip + "/").c_str(), lx, kPanel.y + 138);
+  if (!ip.empty()) {
+    d.fillRect(lx, kPanel.y + 196, 212, 212, TFT_WHITE);
+    d.qrcode(("http://" + ip + "/").c_str(), lx + 6, kPanel.y + 202, 200, 3);
+  }
+  // How it is doing.
+  const int ix = lx + 236;
+  int y = kPanel.y + 196;
+  auto line = [&](const char *k, const std::string &v, uint16_t c) {
+    d.setFont(&lgfx::fonts::FreeSans9pt7b);
+    d.setTextColor(dim, panel);
+    d.drawString(k, ix, y);
+    d.setFont(&lgfx::fonts::FreeSans12pt7b);
+    d.setTextColor(c, panel);
+    std::string t = v.size() > 31 ? v.substr(0, 30) + "..." : v;   // the column ends where the controls begin
+    d.drawString(t.c_str(), ix, y + 18);
+    y += 50;
+  };
+  JsonObject w = st["wifi"];
+  const bool wifi_ok = std::string(w["state"] | "") == "connected";
+  line("WI-FI", wifi_ok ? std::string(w["ssid"] | "") + "  " + std::to_string((int)(w["rssi"] | 0)) + " dBm"
+                        : std::string(w["state"] | "off"), wifi_ok ? good : warn);
+  const bool mq = st["mqtt"]["connected"] | false;
+  line("HOME ASSISTANT", mq ? "connected" : std::string(st["mqtt"]["state"] | "off"), mq ? good : dim);
+  line("CLOCK", std::string(st["content"]["clock"] | "") + ", " + std::string(st["content"]["timezone"] | ""),
+       (st["content"]["clock_trusted"] | false) ? ink : warn);
+  line("SHOWING", std::string(st["content"]["source"] | "") + ": " + std::string(st["content"]["reason"] | ""), ink);
+  char b[96];
+  const uint64_t fb = st["sd"]["free_bytes"] | 0ULL;
+  snprintf(b, sizeof(b), "%s, %.1f GB free", (st["sd"]["mounted"] | false) ? "ready" : "NO CARD", fb / 1e9);
+  line("SD CARD", b, (st["sd"]["mounted"] | false) ? ink : warn);
+  const uint32_t up = st["uptime_s"] | 0;
+  snprintf(b, sizeof(b), "v%s  chip %s  up %luh%02lum", FLAPBOARD_VERSION, (const char *)(st["wifi_chip"]["firmware"] | "?"),
+           (unsigned long)(up / 3600), (unsigned long)(up / 60 % 60));
+  line("FIRMWARE", b, dim);
+  // The controls.
+  drawLevel("VOLUME", sound::volume(), sound::enabled(), kVolDown, kVolUp);
+  int bri;
+  std::string source;
+  {
+    config::Reader r;
+    bri = r.doc()["brightness"] | 80;
+    source = r.doc()["content_source"] | "messages";
+  }
+  drawLevel("BRIGHTNESS", bri, true, kBriDown, kBriUp);
+  d.setFont(&lgfx::fonts::FreeSans12pt7b);
+  d.setTextDatum(bottom_left);
+  d.setTextColor(dim, panel);
+  d.drawString("SHOW", kModes[0].x, kModes[0].y - 8);
+  for (int i = 0; i < 4; i++)
+    drawButton(kModes[i], kModeLabels[i], source == kModeSources[i] ? accent : btn, ink, &lgfx::fonts::FreeSans12pt7b);
+  drawButton(kMute, sound::enabled() ? "Mute" : "Unmute", sound::enabled() ? btn : accent, ink, &lgfx::fonts::FreeSans12pt7b);
+  drawButton(kNext, "Next", btn, ink, &lgfx::fonts::FreeSans12pt7b);
+  drawButton(kShowIp, "Show IP", btn, ink, &lgfx::fonts::FreeSans12pt7b);
+  drawButton(kClose, "Close", btn, ink, &lgfx::fonts::FreeSansBold12pt7b);
   d.endWrite();
 }
 
@@ -308,22 +392,35 @@ bool runPanel(SignState &st) {
       g_panel_open = true;
       drawPanel();
     }
-    g_panel_until = millis() + 15000;
+    g_panel_until = millis() + 30000;
   }
   if (!g_panel_open) return false;
   const int x = g_tap_x, y = g_tap_y;
   if (x >= 0) {
     g_tap_x = g_tap_y = -1;
-    g_panel_until = millis() + 15000;
+    g_panel_until = millis() + 30000;
     bool close = !kPanel.hit(x, y) || kClose.hit(x, y);
-    if (kMinus.hit(x, y)) sound::setVolume(sound::volume() - 10);
-    else if (kPlus.hit(x, y)) sound::setVolume(sound::volume() + 10);
+    if (kVolDown.hit(x, y)) sound::setVolume(sound::volume() - 10);
+    else if (kVolUp.hit(x, y)) sound::setVolume(sound::volume() + 10);
     else if (kMute.hit(x, y)) {
       sound::setEnabled(!sound::enabled());
       if (sound::enabled()) sound::setVolume(sound::volume());   // a preview when unmuting
+    } else if (kBriDown.hit(x, y)) post(ActionKind::Brightness, -10);
+    else if (kBriUp.hit(x, y)) post(ActionKind::Brightness, +10);
+    else if (kNext.hit(x, y)) post(ActionKind::Next, 0);
+    else if (kShowIp.hit(x, y)) {
+      post(ActionKind::ShowIp, 0);
+      close = true;   // so the board can show it
+    } else {
+      for (int i = 0; i < 4; i++)
+        if (kModes[i].hit(x, y)) post(ActionKind::Source, i);
     }
     if (!close) drawPanel();
     else g_panel_until = 0;
+  }
+  if (g_redraw_at && (int32_t)(millis() - g_redraw_at) >= 0) {
+    g_redraw_at = 0;
+    drawPanel();
   }
   if ((int32_t)(millis() - g_panel_until) >= 0) {
     g_panel_open = false;
@@ -578,6 +675,8 @@ void show(const std::string &text, int align, bool vertical_center) {
 
 void runBench() { g_bench = true; }
 void openPanel() { g_panel_req = true; }
+bool takeAction(Action *a) { return xQueueReceive(g_actions, a, 0) == pdTRUE; }
+const char *sourceForMode(int i) { return i >= 0 && i < 4 ? kModeSources[i] : "messages"; }
 void setActive(bool active) { g_active = active; }
 bool panelOpen() { return g_panel_open; }
 void panelTap(int x, int y) {

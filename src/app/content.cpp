@@ -5,6 +5,8 @@
 #include <dirent.h>
 #include <esp_random.h>
 #include <sys/stat.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include <flapcore/template.h>
 
@@ -244,26 +246,39 @@ void begin() {
 
 void libraryChanged() { g_lib_dirty = true; }
 
+void publishStatus();
 void showOverride(const std::string &text, int seconds) {
   g_override = text;
   g_override_on = true;
   g_override_until = seconds > 0 ? millis() + (uint32_t)seconds * 1000 : 0;
   g_shown.clear();
   sign::show(expand(text), 1, true);
+  publishStatus();
 }
 
 void next() { g_next_ms = millis(); }
-std::string overrideText() { return g_override_on ? g_override : ""; }
+std::string overrideText() {
+  JsonDocument d;
+  deserializeJson(d, statusJson());
+  return (d["override"] | false) ? std::string(d["override_text"] | "") : std::string();
+}
 
 void clearOverride() {
   g_override_on = false;
   g_shown.clear();
+  publishStatus();
 }
 
+void loopInner();
 void loop() {
   static uint32_t last = 0;
   if (millis() - last < 1000) return;
   last = millis();
+  loopInner();
+  publishStatus();
+}
+
+void loopInner() {
   const Program p = readProgram();
   const std::string key = programKey(p);
   if (key != g_key) {   // new program: start it now
@@ -303,7 +318,12 @@ void loop() {
   }
 }
 
-std::string statusJson() {
+// The main loop owns g_cur, g_shown and friends; other tasks (the web server,
+// the info sheet) read a copy published here under a lock.
+SemaphoreHandle_t g_status_mux = xSemaphoreCreateMutex();
+std::string g_status_json = "{}";
+
+std::string buildStatus() {
   JsonDocument d;
   d["source"] = g_source;
   d["reason"] = g_reason;
@@ -312,12 +332,27 @@ std::string statusJson() {
   d["file"] = g_cur.file;
   d["shown"] = g_shown;
   d["override"] = g_override_on;
+  d["override_text"] = g_override_on ? g_override : "";
   d["clock"] = clock::statusText();
   d["timezone"] = clock::zone();
   d["clock_trusted"] = clock::trusted();
   std::string out;
   serializeJson(d, out);
   return out;
+}
+
+void publishStatus() {
+  std::string s = buildStatus();
+  xSemaphoreTake(g_status_mux, portMAX_DELAY);
+  g_status_json.swap(s);
+  xSemaphoreGive(g_status_mux);
+}
+
+std::string statusJson() {
+  xSemaphoreTake(g_status_mux, portMAX_DELAY);
+  std::string s = g_status_json;
+  xSemaphoreGive(g_status_mux);
+  return s;
 }
 
 }  // namespace content

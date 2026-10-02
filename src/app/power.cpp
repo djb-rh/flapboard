@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <M5Unified.h>
 #include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 #include <algorithm>
 
@@ -125,6 +127,10 @@ void beginEarly() {
 
 void begin() {}
 
+std::string buildStatus();
+extern SemaphoreHandle_t g_status_mux;
+extern std::string g_status_json;
+
 void loop() {
   static uint32_t last = 0;
   if (millis() - last < 250) return;
@@ -180,6 +186,10 @@ void loop() {
   if (!testing) g_relay_test_until = 0;
   const bool relay = g_on || testing;
   if (g_pin >= 0 && relay != g_relay) driveRelay(relay);
+  std::string st = buildStatus();
+  xSemaphoreTake(g_status_mux, portMAX_DELAY);
+  g_status_json.swap(st);
+  xSemaphoreGive(g_status_mux);
 }
 
 bool isOn() { return g_on; }
@@ -198,7 +208,10 @@ void wake() {
 void requestLatch(bool off) { g_latch_req = off ? 1 : 0; }
 void testRelay(int seconds) { g_relay_test_until = millis() + (uint32_t)seconds * 1000; }
 
-std::string statusJson() {
+SemaphoreHandle_t g_status_mux = xSemaphoreCreateMutex();
+std::string g_status_json = "{}";
+
+std::string buildStatus() {
   JsonDocument d;
   d["on"] = g_on;
   d["reason"] = g_reason;
@@ -210,6 +223,14 @@ std::string statusJson() {
   std::string out;
   serializeJson(d, out);
   return out;
+}
+
+// Built by the main loop (which owns g_reason); read by any task.
+std::string statusJson() {
+  xSemaphoreTake(g_status_mux, portMAX_DELAY);
+  std::string s = g_status_json;
+  xSemaphoreGive(g_status_mux);
+  return s;
 }
 
 }  // namespace power

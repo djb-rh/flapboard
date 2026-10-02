@@ -28,6 +28,10 @@ volatile bool g_connected = false;
 volatile bool g_need_discovery = false;
 std::string g_uid, g_base, g_server_key, g_error = "not configured";
 std::string g_will;   // must outlive the client config
+// Whether a password is stored, cached: reading NVS stalls the flash cache,
+// and statusJson() is also called from the render task (PSRAM stack), where
+// that asserts and resets the board.
+volatile bool g_has_password = false;
 uint32_t g_last_heartbeat = 0;
 std::string g_last_state;   // what was published last (publish on change)
 
@@ -227,6 +231,7 @@ void connect() {
     user = r.doc()["mqtt_user"] | "";
   }
   const std::string pass = password();
+  g_has_password = !pass.empty();
   const std::string key = host + ":" + std::to_string(port) + ":" + user + ":" + pass;
   if (key == g_server_key) return;
   g_server_key = key;
@@ -359,6 +364,7 @@ void publishState(bool force) {
 
 void begin() {
   g_cmds = xQueueCreate(8, sizeof(Command));
+  g_has_password = !password().empty();   // main loop, at boot
   g_uid = uid();
   g_base = "flapboard/" + g_uid;
 }
@@ -397,6 +403,7 @@ void setServer(const std::string &host, int port, const std::string &user, const
     pr.begin("flapboard", false);
     pr.putString("mqtt_pass", pass.c_str());
     pr.end();
+    g_has_password = true;
   }
 }
 
@@ -405,7 +412,7 @@ std::string statusJson() {
   d["connected"] = (bool)g_connected;
   d["state"] = g_connected ? "connected" : g_error;
   d["topic_base"] = g_base;
-  d["password_stored"] = !password().empty();
+  d["password_stored"] = (bool)g_has_password;
   std::string out;
   serializeJson(d, out);
   return out;

@@ -2,12 +2,15 @@
 // Phase 1 skeleton: Wi-Fi + setup hotspot, web UI and file library, config,
 // serial console. See PLAN.md.
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <M5Unified.h>
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_task_wdt.h>
 #include <sys/stat.h>
+
+#include <algorithm>
 
 #include "clock.h"
 #include "config.h"
@@ -128,6 +131,27 @@ void loop() {
   mqtt::loop();
   status::update();
   console::loop();
+  sign::Action a;
+  while (sign::takeAction(&a)) {   // info-sheet buttons: settings are written here, on the main loop
+    std::string err;
+    JsonDocument p;
+    if (a.kind == sign::ActionKind::Brightness) {
+      int b;
+      {
+        config::Reader r;
+        b = r.doc()["brightness"] | 80;
+      }
+      p["brightness"] = std::max(5, std::min(100, b + a.arg));
+      config::apply(p.as<JsonVariantConst>(), &err);
+    } else if (a.kind == sign::ActionKind::Source) {
+      p["content_source"] = sign::sourceForMode(a.arg);
+      config::apply(p.as<JsonVariantConst>(), &err);
+    } else if (a.kind == sign::ActionKind::Next) {
+      content::next();
+    } else if (a.kind == sign::ActionKind::ShowIp) {
+      content::showOverride("{name}||{hostname}|{ip}", 30);
+    }
+  }
   if (web::takeRebootRequest()) {
     note("restarting (asked from the web)");
     delay(300);

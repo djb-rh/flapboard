@@ -30,6 +30,8 @@
 
 <section class="card"><h2>How the clock and weather read</h2>
 <label for="clock_template">Clock message</label><input id="clock_template"><div class="sample" id="s_clock"></div>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px"><input type="checkbox" id="clock_rb_mode" style="width:auto"> RB Mode: on Fridays, the clock adds this message</label>
+<input id="clock_friday_text" maxlength="120"><div class="sample" id="s_friday"></div>
 <label for="weather_template">Weather message</label><input id="weather_template"><div class="sample" id="s_weather"></div>
 <p class="hint">| starts a new row. Fields: {time} {date} {temp} {feels} {hi} {lo} {hum} {wind} {cond} {place} {units} {wind_units}. A field can carry its own format: {time:%H:%M}. To show one of these, choose it on the <a href="/messages">Messages</a> page, or use the fields inside any message.</p></section>
 
@@ -39,17 +41,18 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
-const KEYS=['timezone','ntp_server','time_format','date_format','weather_place','weather_lat','weather_lon','units','weather_minutes','clock_template','weather_template'];
+const KEYS=['timezone','ntp_server','time_format','date_format','weather_place','weather_lat','weather_lon','units','weather_minutes','clock_template','clock_rb_mode','clock_friday_text','weather_template'];
 const NUMS=['weather_lat','weather_lon','weather_minutes'];
 let saved={};
-function form(){const c={};KEYS.forEach(k=>c[k]=NUMS.includes(k)?+$('#'+k).value:$('#'+k).value);return c}
+function form(){const c={};KEYS.forEach(k=>{const el=$('#'+k);c[k]=el.type==='checkbox'?el.checked:NUMS.includes(k)?+el.value:el.value});return c}
 // Samples are expanded by the sign itself, so they show exactly what it would.
 // Unsaved formats are substituted in first.
 async function expand(tpl){const c=form();tpl=tpl.replace(/\{time\}/g,'{time:'+c.time_format+'}').replace(/\{date\}/g,'{date:'+c.date_format+'}');
   try{return (await (await fetch('/api/content?expand='+encodeURIComponent(tpl))).json()).text}catch(e){return ''}}
 let t=null;function samples(){clearTimeout(t);t=setTimeout(async()=>{const c=form();
   $('#s_time').textContent=await expand('{time}');$('#s_date').textContent=await expand('{date}');
-  $('#s_clock').textContent=(await expand(c.clock_template)).split('|').join('\n');$('#s_weather').textContent=(await expand(c.weather_template)).split('|').join('\n');
+  $('#s_clock').textContent=(await expand(c.clock_template)).split('|').join('\n');
+  $('#s_friday').textContent=c.clock_rb_mode&&c.clock_friday_text?'On Fridays:\n'+(await expand(c.clock_friday_text+'|'+c.clock_template)).split('|').join('\n'):'';$('#s_weather').textContent=(await expand(c.weather_template)).split('|').join('\n');
   $('#dirty').textContent=JSON.stringify(c)!==JSON.stringify(saved)?'Unsaved changes':''},250)}
 async function status(){try{const s=await (await fetch('/api/status')).json();$('#name').textContent=s.device_name;
   $('#time').textContent=await expand('{time:%-I:%M:%S %p}  {date:%a %b %-d %Y}');
@@ -67,8 +70,8 @@ $('#q').addEventListener('keydown',e=>{if(e.key==='Enter')$('#find').click()});
 $('#refresh').onclick=async()=>{await fetch('/api/weather',{method:'POST'});note('ok','Asked for fresh weather; it shows here in a few seconds.');setTimeout(status,5000)};
 $('#save').onclick=async()=>{const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form())});const d=await r.json();
   if(!r.ok){note('err',d.error);return}saved=form();samples();note('ok','Saved.');setTimeout(status,1500)};
-document.querySelectorAll('input,select').forEach(el=>{if(el.id!=='q')el.addEventListener('input',samples)});
+document.querySelectorAll('input,select').forEach(el=>{if(el.id!=='q'){el.addEventListener('input',samples);el.addEventListener('change',samples)}});
 (async()=>{const z=await (await fetch('/api/zones')).text();const sel=$('#timezone');
   z.trim().split('\n').map(l=>l.split('\t')[0]).forEach(n=>sel.add(new Option(n.replace(/_/g,' '),n)));
-  const c=await (await fetch('/api/config')).json();KEYS.forEach(k=>$('#'+k).value=c[k]);saved=form();samples();status();setInterval(status,5000)})();
+  const c=await (await fetch('/api/config')).json();KEYS.forEach(k=>{const el=$('#'+k);if(el.type==='checkbox')el.checked=!!c[k];else el.value=c[k]});saved=form();samples();status();setInterval(status,5000)})();
 </script></body></html>

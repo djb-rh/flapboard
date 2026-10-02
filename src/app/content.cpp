@@ -147,6 +147,8 @@ bool lookup(const std::string &name, const std::string &arg, std::string *out) {
 // are global settings.
 struct Program {
   std::string source = "messages", order = "random", text, clock_tpl, weather_tpl;
+  bool rb_mode = false;        // RB Mode: on Fridays the clock adds friday_text
+  std::string friday_text;
   std::vector<std::string> files;
   int dwell = 20;
 };
@@ -198,6 +200,8 @@ Program readProgram() {
       def.dwell = d["photo_dwell"] | 30;
     }
     p.clock_tpl = d["clock_template"] | "{time}|{date}";
+    p.rb_mode = d["clock_rb_mode"] | false;
+    p.friday_text = d["clock_friday_text"] | "";
     p.weather_tpl = d["weather_template"] | "{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}";
     enabled = d["schedule_enabled"] | false;
     rules = rulesFrom(d["schedule_rules"]);
@@ -223,7 +227,7 @@ Program readProgram() {
 }
 
 std::string programKey(const Program &p) {
-  std::string k = p.source + "|" + p.order + "|" + std::to_string(p.dwell) + "|" + p.text + "|" + p.clock_tpl + "|" +
+  std::string k = p.source + "|" + p.order + "|" + std::to_string(p.dwell) + "|" + p.text + "|" + p.clock_tpl + "|" + (p.rb_mode ? "rb:" + p.friday_text : "") + "|" +
                   p.weather_tpl + "|";
   for (auto &f : p.files) k += f + ",";
   return k;
@@ -369,7 +373,13 @@ void loopInner() {
   const bool due = !g_have || (int32_t)(millis() - g_next_ms) >= 0;
   if (due) {
     bool ok = true;
-    if (p.source == "clock") g_cur = Message{"", p.clock_tpl};
+    if (p.source == "clock") {
+      std::string tpl = p.clock_tpl;
+      struct tm t;
+      if (p.rb_mode && !p.friday_text.empty() && clock::trusted() && clock::localNow(&t) && t.tm_wday == 5)
+        tpl = p.friday_text + "|" + tpl;   // long text wraps onto as many rows as it needs
+      g_cur = Message{"", tpl};
+    }
     else if (p.source == "weather") g_cur = Message{"", p.weather_tpl};
     else if (p.source == "text") g_cur = Message{"", p.text};
     else ok = pickNext(p);

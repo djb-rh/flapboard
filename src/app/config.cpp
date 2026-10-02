@@ -53,6 +53,8 @@ constexpr const char *kDefaults = R"JSON({
   "content_dwell": 20,
   "content_text": "",
   "clock_template": "{time}|{date}",
+  "clock_rb_mode": false,
+  "clock_friday_text": "HAPPY FRIDAY!",
   "weather_template": "{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}",
   "time_format": "%-I:%M %p",
   "date_format": "%a %b %-d",

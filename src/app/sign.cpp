@@ -744,7 +744,8 @@ bool ppaBlend(PanelSurface &surf, M5Canvas *bg, M5Canvas *fg, int alpha) {
 }
 
 // Canvas -> framebuffer. mix 0..256 blends from `from` (0) to `to` (256);
-// shift slides `to` in from the right by that many logical pixels left to go.
+// shift > 0 slides: the old picture has moved that many logical pixels left
+// and the new one follows it in from the right (1..width).
 void showFrame(PanelSurface &surf, M5Canvas *from, M5Canvas *to, int mix, int shift) {
   uint16_t *fb = (uint16_t *)surf.fb;
   const uint16_t *a = from ? (const uint16_t *)from->getBuffer() : nullptr;
@@ -752,13 +753,12 @@ void showFrame(PanelSurface &surf, M5Canvas *from, M5Canvas *to, int mix, int sh
   const size_t n = (size_t)surf.pw * surf.ph;
   if (shift <= 0 && ppaBlend(surf, from, to, mix >= 256 || !a ? 255 : mix)) return;   // hardware; it syncs the caches
   if (shift > 0 && a) {
-    // Logical x runs along panel rows (rotation 3: row = ph-1-x). Rows whose
-    // logical x < 1280-shift show `from` moved left by (1280-shift)... i.e.
-    // the old picture leaving and the new arriving, row blocks only.
-    const int W = surf.ph, sh = shift;
+    // Logical x runs along panel rows (rotation 3: row = ph-1-x), so each
+    // logical column is one contiguous panel row: copy whole rows.
+    const int W = surf.ph, sh = std::min(shift, surf.ph);
     for (int x = 0; x < W; x++) {
       const int row = surf.rot == 3 ? surf.ph - 1 - x : x;
-      const int src_x = x + (W - sh);            // into the old picture, shifted left
+      const int src_x = x + sh;                  // the old picture, moved left by sh
       const bool old = src_x < W;
       const int sx = old ? src_x : src_x - W;    // into the new one
       const int srow = surf.rot == 3 ? surf.ph - 1 - sx : sx;

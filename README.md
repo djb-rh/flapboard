@@ -125,6 +125,8 @@ passwords and photos are not included. **Restore backup** puts them back, on thi
 - `pio run -e app`: the firmware. The web pages, fonts, sounds and time zone table are embedded
   at build time by `tools/embed_web.py`.
 - `pio test -e native`: the tests for the parts that do not need the hardware.
+- `tools/prep_photos.py OUT SRC...` and `tools/put_folder.py HOST OUT photos/NAME`: shrink a big
+  photo collection on the computer (as the Files page would) and upload it with thumbnails.
 - `tools/release.sh`: release images in `dist/` and the web installer in `site/`.
 - For development, `include/secrets.h` (gitignored) can hold `WIFI_SSID` and `WIFI_PASSWORD`
   to skip the setup hotspot; release builds leave it out.

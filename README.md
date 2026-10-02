@@ -27,8 +27,10 @@ esptool.py --chip esp32p4 write_flash 0 flapboard-0.9.0.bin
 
 ### First start
 
-Put in a microSD card formatted **FAT32** (exFAT, which most cards over 32 GB come with, is not
-supported). The sign makes its folders on it.
+Put in a microSD card. The sign reads **FAT32**; most cards over 32 GB come formatted exFAT, which
+it can't read. It says so on the info sheet and the Files page, and **Files > Format SD card**
+turns the card into FAT32 (this erases it). Windows and macOS read and write the result normally;
+Windows only refuses to *format* large cards as FAT32. The sign makes its folders on the card.
 
 The sign opens a Wi-Fi hotspot called **FlapBoard-XXXX**. Join it from a phone; the setup page
 opens by itself. Pick your network and type its password. After that the sign is at

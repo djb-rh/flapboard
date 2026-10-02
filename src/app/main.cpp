@@ -8,6 +8,7 @@
 #include <esp_log.h>
 #include <esp_netif.h>
 #include <esp_ota_ops.h>
+#include <Preferences.h>
 #include <esp_task_wdt.h>
 #include <sys/stat.h>
 
@@ -51,7 +52,28 @@ void makeLibraryFolders() {
 
 }  // namespace
 
-static void mem(const char *stage) {
+static // The web page's "Format SD card" leaves a flag and restarts; the format runs
+// here, before Wi-Fi: the card shares the P4's SDIO host with the Wi-Fi chip,
+// and the link watchdog must not restart the sign halfway through.
+void formatCardIfAsked() {
+  Preferences p;
+  p.begin("flapboard", false);
+  const bool asked = p.getBool("sd_format", false);
+  if (asked) p.remove("sd_format");   // cleared first: a failed format must not loop
+  p.end();
+  if (!asked) return;
+  M5.Display.fillScreen(TFT_BLACK);
+  M5.Display.setTextColor(TFT_WHITE);
+  M5.Display.setTextDatum(middle_center);
+  M5.Display.setFont(&fonts::DejaVu40);
+  M5.Display.drawString("Formatting the SD card...", M5.Display.width() / 2, M5.Display.height() / 2);
+  note("sd: formatting the whole card (FAT32), asked from the web page");
+  const bool ok = sdcard::formatWholeCard();
+  note("sd: format %s", ok ? "done" : "FAILED");
+  M5.Display.fillScreen(TFT_BLACK);
+}
+
+void mem(const char *stage) {
   note("mem %-14s internal %3u KB, largest DMA %3u KB", stage, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
        (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) / 1024));
 }
@@ -73,8 +95,9 @@ void setup() {
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);   // never block on a USB console nobody reads
 
+  formatCardIfAsked();
   if (sdcard::begin()) makeLibraryFolders();
-  else note("sd: no card (or not FAT32): the file library is unavailable");
+  else note("sd: not mounted (%s): the file library is unavailable", sdcard::problem());
 
   mem("before sound");
   clock::begin();

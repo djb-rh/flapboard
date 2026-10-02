@@ -141,3 +141,10 @@ Per cell, on-device `bench` (serial):
 - Release builds define `FLAPBOARD_RELEASE`, which drops the developer Wi-Fi seed in `secrets.h`;
   tools/release.sh fails if the SSID is found in the image (`LC_ALL=C grep -a`: plain grep on the
   binary silently matched nothing). The Arduino libs have no exFAT: SD cards must be FAT32.
+- SD: when the mount fails, `sdcard::probe()` initialises the card raw (slot 0, IO-MUX, 1-bit) and reads
+  sector 0 (MBR/GPT -> first partition's boot sector) to report none / exfat / ntfs / unformatted / unknown.
+  This runs at boot, before Wi-Fi: the SD slot shares the P4's SDIO host with the C6, so `sdmmc_host_deinit`
+  (and SD_MMC.end) must not run once Wi-Fi is up. For the same reason the web page's format sets an NVS flag
+  and restarts; `formatCardIfAsked()` formats before Wi-Fi and before the task watchdog starts.
+- OTA's first piece waits (<= 600 ms) until the main loop has blanked the screen: before that, the first
+  sector erase gave two quick white flashes.

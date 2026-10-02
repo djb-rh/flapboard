@@ -36,6 +36,7 @@ int g_pin = -1;
 bool g_active_high = true;
 bool g_relay = false;
 int g_brightness = -1;
+volatile bool g_blanked_for_update = false;
 std::string g_reason = "starting";
 int g_ext5v = -1;   // Port A / M5-Bus 5 V rail: -1 unknown, 0 off, 1 on
 
@@ -182,6 +183,7 @@ void loop() {
     updating = !updating;
     if (updating) apply(false, 0);
     else g_brightness = -1;
+    g_blanked_for_update = updating;
   }
   if (!updating && (p.on != g_on || p.reason != g_reason || (p.on && brightness != g_brightness))) {
     if (p.on != g_on) note("power: %s (%s)", p.on ? "on" : "off", p.reason.c_str());
@@ -202,6 +204,7 @@ void loop() {
 }
 
 bool isOn() { return g_on; }
+bool blankedForUpdate() { return g_blanked_for_update; }
 
 void wake() {
   int minutes;

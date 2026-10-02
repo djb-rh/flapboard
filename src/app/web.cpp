@@ -5,6 +5,7 @@
 #include <esp_heap_caps.h>
 #include <esp_http_server.h>
 #include <esp_ota_ops.h>
+#include <Preferences.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -735,6 +736,9 @@ esp_err_t handleOta(httpd_req_t *req) {
   if (offset == 0) {
     if (g_ota.handle) esp_ota_abort(g_ota.handle);
     g_ota = OtaState();
+    // The main loop blanks the screen (power.cpp) within ~250 ms; the first
+    // erase would otherwise flash the panel white before that.
+    for (int i = 0; i < 30 && !power::blankedForUpdate(); i++) vTaskDelay(pdMS_TO_TICKS(20));
     g_ota.part = esp_ota_get_next_update_partition(nullptr);
     if (!g_ota.part) return sendError(req, 500, "no spare firmware slot (partition table)");
     // Sequential writes: each sector is erased as it is reached, not all 6 MB up front.
@@ -845,6 +849,22 @@ esp_err_t handleRestore(httpd_req_t *req) {
   return sendJson(req, 200, "{\"settings\":" + std::to_string(applied) + ",\"messages\":" + std::to_string(written) + "}");
 }
 
+// {"confirm":"ERASE"}: formats the whole card as FAT32 at the next start
+// (see main.cpp, formatCardIfAsked) and restarts now.
+esp_err_t handleSdFormat(httpd_req_t *req) {
+  std::string body;
+  if (!readBody(req, &body, 256)) return sendError(req, 400, "request too large");
+  JsonDocument q;
+  if (deserializeJson(q, body) || std::string(q["confirm"] | "") != "ERASE") return sendError(req, 400, "not confirmed");
+  Preferences p;
+  p.begin("flapboard", false);
+  p.putBool("sd_format", true);
+  p.end();
+  note("sd: format asked from the web page; restarting to do it");
+  g_reboot = true;
+  return sendJson(req, 200, "{\"restarting\":true}");
+}
+
 esp_err_t handleLibOp(httpd_req_t *req) {
   std::string body;
   if (!readBody(req, &body)) return sendError(req, 400, "request too large");
@@ -942,6 +962,7 @@ void begin() {
       {"/api/ota", HTTP_POST, handleOta},
       {"/api/backup", HTTP_GET, handleBackup},
       {"/api/restore", HTTP_POST, handleRestore},
+      {"/api/sdformat", HTTP_POST, handleSdFormat},
       {"/library/mkdir", HTTP_POST, handleLibOp},
       {"/library/delete", HTTP_POST, handleLibOp},
       {"/library/rename", HTTP_POST, handleLibOp},

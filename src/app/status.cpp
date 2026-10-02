@@ -98,6 +98,7 @@ std::string json() {
   sd["free_bytes"] = fb;
   sd["total_bytes"] = tb;
   sd["bus"] = sdcard::busWidth();
+  sd["problem"] = sdcard::problem();
   xSemaphoreTake(g_mux, portMAX_DELAY);
   d["rtc"] = g_rtc;
   JsonObject b = d["battery"].to<JsonObject>();

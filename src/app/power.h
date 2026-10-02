@@ -20,6 +20,8 @@ void begin();        // after M5.begin()
 void loop();         // main loop (backlight and NVS are main-loop work)
 
 bool isOn();
+// The screen is dark because a firmware update is arriving (web.cpp waits for it).
+bool blankedForUpdate();
 void wake();                    // a tap while dark
 void requestLatch(bool off);    // any task: true = "off" (held), false = release ("on")
 void testRelay(int seconds);    // any task: relay on for a moment, to check the wiring

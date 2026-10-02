@@ -15,6 +15,10 @@ uint64_t cardBytes();
 void space(uint64_t *free_b, uint64_t *total_b);
 // Repartitions the whole card and writes FAT32 (32 KB clusters). ERASES IT.
 bool formatWholeCard();
+// Why a card isn't mounted, from a raw look at its first sectors when the
+// mount failed: "" (mounted), "none" (no card answered), "exfat", "ntfs",
+// "unformatted" or "unknown". Set by begin().
+const char *problem();
 
 }  // namespace sdcard
 }  // namespace flapboard

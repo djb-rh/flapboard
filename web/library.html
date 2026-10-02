@@ -26,6 +26,13 @@
 <label id="shrinkrow" style="display:flex;gap:8px;align-items:center;margin:-6px 0 12px;color:var(--text);font-size:14px" hidden><input type="checkbox" id="shrink" checked style="width:auto"> Shrink photos to the screen's size while uploading (recommended: faster, and iPhone HEIC photos work)</label>
 <input type="file" id="picker" multiple style="display:none">
 <div id="list"></div>
+</section>
+<section class="card" id="cardsec"><h2>SD card</h2>
+<div id="sdmsg"></div>
+<p class="hint">Formatting erases everything on the card and makes it FAT32, which this sign, Windows and macOS all read and
+write (Windows only refuses to <i>format</i> cards over 32 GB as FAT32). The sign restarts to do it; a 128 GB card takes
+under a minute.</p>
+<div class="row"><button id="sdformat" class="danger">Format SD card...</button></div>
 </section></main>
 <script>
 // Ported from the Pi photo frame's file manager: same /library API and JSON.
@@ -37,6 +44,24 @@ function size(n){if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0;w
 function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
 function crumbs(path){let out='<a onclick="go(\'\')">SD card</a>',acc='';
   (path?path.split('/'):[]).forEach(p=>{acc=acc?acc+'/'+p:p;out+=' / <a onclick="go(\''+q(acc)+'\')">'+esc(p)+'</a>'});return out}
+const SDWHY={exfat:'The card is formatted exFAT, which this sign cannot read. Format it here as FAT32 (this erases it).',
+  ntfs:'The card is formatted NTFS, which this sign cannot read. Format it here as FAT32 (this erases it).',
+  unformatted:'The card is not formatted. Format it here.',
+  unknown:'The card is in a format this sign cannot read, or damaged. Formatting it here as FAT32 usually fixes that (this erases it).',
+  none:'No SD card found. Put one in and restart the sign.'};
+async function sdCheck(){try{const s=await (await fetch('/api/status')).json();const why=s.sd.mounted?'':(s.sd.problem||'unknown');
+  $('#sdmsg').innerHTML=why?'<div class="msg err">'+esc(SDWHY[why]||SDWHY.unknown)+'</div>':'';
+  $('#sdformat').disabled=why==='none';
+  if(why){$('#up').disabled=$('#mkdir').disabled=true;$('#list').innerHTML='';$('#crumbs').innerHTML=''}
+  return !why}catch(e){return true}}
+$('#sdformat').onclick=async()=>{
+  const t=prompt('This erases EVERYTHING on the SD card: photos, messages, fonts, sounds. Download a backup first if you need the messages (Status page).\n\nType ERASE to format it.');
+  if(t!=='ERASE'){if(t!==null)note('err','Not formatted: type ERASE in capitals to confirm.');return}
+  const r=await fetch('/api/sdformat',{method:'POST',body:JSON.stringify({confirm:'ERASE'})});const d=await r.json();
+  if(!r.ok){note('err',d.error||'Could not start the format');return}
+  $('#sdformat').disabled=true;$('#sdmsg').innerHTML='<div class="msg ok">Restarting to format the card. This page reloads when the sign is back (about a minute).</div>';
+  const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store'})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
+    if(Date.now()-t0<240000)setTimeout(wait,3000);else $('#sdmsg').innerHTML='<div class="msg err">The sign has not come back yet. Check it, then reload this page.</div>'},10000)};
 async function go(path){cwd=path||'';
   try{const r=await fetch('/library/list?path='+encodeURIComponent(cwd));const d=await r.json();
     if(!r.ok){note('err',d.error||'Could not open folder');return}render(d)}catch(e){note('err','Could not reach the sign')}}
@@ -137,5 +162,5 @@ $('#picker').onchange=async function(){
   if(failed.length)parts.push('Failed: '+failed.join(', ')+'.');
   note(failed.length?'err':'ok',parts.join(' ')||'Nothing to upload.');go(cwd)};
 fetch('/api/status').then(r=>r.json()).then(s=>{$('#name').textContent=s.device_name}).catch(()=>{});
-go('');
+sdCheck().then(ok=>{if(ok)go('')});
 </script></body></html>

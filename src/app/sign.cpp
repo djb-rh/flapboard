@@ -553,12 +553,20 @@ volatile bool g_photo_failed_flag = false;
 struct PhotoState {
   M5Canvas *cur = nullptr, *next = nullptr;
   M5Canvas *tiny = nullptr;   // the blur-fill source
+  // The clock/caption layer: same layout as the framebuffer, kOverlayKey
+  // where there is nothing. Composited over every frame, transitions too.
+  M5Canvas *ov = nullptr;
+  uint16_t key_raw = 0;   // kOverlayKey as stored in the canvas (byte-swapped)
+  bool stamped = false;   // during a dissolve the overlay is inside both pictures
   std::string shown, caption;
   int rot = 3;
   int last_minute = -1;
   Rect overlay{0, 0, 0, 0};   // where text was drawn (restored before redrawing)
   uint32_t decode_ms = 0, transition_ms = 0, frames = 0;
 } g_ph;
+
+// Never drawn by text or the caption box (outline black, box 0x0841, text white).
+constexpr uint16_t kOverlayKey = 0x0020;
 
 bool ensureCanvases(int rot) {
   if (g_ph.cur && g_ph.rot == rot) return true;
@@ -574,6 +582,18 @@ bool ensureCanvases(int rot) {
     (*c)->setRotation(rot);
     (*c)->fillScreen(TFT_BLACK);
   }
+  if (g_ph.ov) {
+    g_ph.ov->deleteSprite();
+    delete g_ph.ov;
+  }
+  g_ph.ov = new M5Canvas(&M5.Display);
+  g_ph.ov->setPsram(true);
+  g_ph.ov->setColorDepth(16);
+  if (!g_ph.ov->createSprite(720, 1280)) return false;
+  g_ph.ov->setRotation(rot);
+  g_ph.ov->fillScreen(kOverlayKey);
+  g_ph.key_raw = ((const uint16_t *)g_ph.ov->getBuffer())[0];
+  g_ph.overlay = {0, 0, 0, 0};
   if (!g_ph.tiny) {
     g_ph.tiny = new M5Canvas(&M5.Display);
     g_ph.tiny->setPsram(true);
@@ -702,7 +722,14 @@ bool decodePhoto(M5Canvas &c, const std::string &rel, const PhotoSettings &ps) {
 ppa_client_handle_t g_ppa = nullptr;
 bool g_ppa_failed = false;
 
-bool ppaBlend(PanelSurface &surf, M5Canvas *bg, M5Canvas *fg, int alpha) {
+// Panel-space block (columns x, rows y); w = 0 means the whole frame.
+struct Block {
+  int x = 0, y = 0, w = 0, h = 0;
+};
+
+bool ppaBlend(PanelSurface &surf, M5Canvas *bg, M5Canvas *fg, int alpha, Block blk = Block()) {
+  if (blk.w == 0) blk = {0, 0, surf.pw, surf.ph};
+  if (blk.w <= 0 || blk.h <= 0) return true;
   if (g_ppa_failed) return false;
   if (!g_ppa) {
     ppa_client_config_t c = {};
@@ -717,8 +744,10 @@ bool ppaBlend(PanelSurface &surf, M5Canvas *bg, M5Canvas *fg, int alpha) {
     b.buffer = cv->getBuffer();
     b.pic_w = surf.pw;
     b.pic_h = surf.ph;
-    b.block_w = surf.pw;
-    b.block_h = surf.ph;
+    b.block_offset_x = blk.x;
+    b.block_offset_y = blk.y;
+    b.block_w = blk.w;
+    b.block_h = blk.h;
     b.blend_cm = PPA_BLEND_COLOR_MODE_RGB565;
     return b;
   };
@@ -729,6 +758,8 @@ bool ppaBlend(PanelSurface &surf, M5Canvas *bg, M5Canvas *fg, int alpha) {
   o.out.buffer_size = surf.stride * surf.ph;
   o.out.pic_w = surf.pw;
   o.out.pic_h = surf.ph;
+  o.out.block_offset_x = blk.x;
+  o.out.block_offset_y = blk.y;
   o.out.blend_cm = PPA_BLEND_COLOR_MODE_RGB565;
   o.bg_byte_swap = true;
   o.fg_byte_swap = true;
@@ -746,18 +777,88 @@ bool ppaBlend(PanelSurface &surf, M5Canvas *bg, M5Canvas *fg, int alpha) {
   return true;
 }
 
-// Canvas -> framebuffer. mix 0..256 blends from `from` (0) to `to` (256);
-// shift > 0 slides: the old picture has moved that many logical pixels left
-// and the new one follows it in from the right (1..width).
+// A logical rectangle in panel space (rotation 3: row = ph-1-x, column = y;
+// rotation 1: row = x, column = pw-1-y).
+Block panelBlock(const PanelSurface &surf, const Rect &r) {
+  Block b;
+  if (r.w <= 0 || r.h <= 0) return b;
+  const int r0 = surf.rot == 3 ? surf.ph - (r.x + r.w) : r.x;
+  const int c0 = surf.rot == 3 ? r.y : surf.pw - (r.y + r.h);
+  b.y = std::max(0, r0);
+  b.x = std::max(0, c0);
+  b.h = std::min(surf.ph, r0 + r.w) - b.y;
+  b.w = std::min(surf.pw, c0 + r.h) - b.x;
+  if (b.w <= 0 || b.h <= 0) b = Block();
+  return b;
+}
+
+inline uint16_t mix565(uint16_t p, uint16_t q, uint32_t k) {   // p..q by k/256, both native order
+  const uint32_t j = 256 - k;
+  const uint32_t rb = (((p & 0xF81Fu) * j + (q & 0xF81Fu) * k) >> 8) & 0xF81Fu;
+  const uint32_t g = (((p & 0x07E0u) * j + (q & 0x07E0u) * k) >> 8) & 0x07E0u;
+  return (uint16_t)(rb | g);
+}
+
+// The overlay layer over the picture underneath, for the panel rows and
+// columns of `b`: dissolve (from -> to by mix), slide (shift) or just `to`.
+void compositeOverlay(PanelSurface &surf, const Block &b, const uint16_t *a, const uint16_t *t, int mix, int shift) {
+  if (b.w <= 0) return;
+  uint16_t *fb = (uint16_t *)surf.fb;
+  const uint16_t *ov = (const uint16_t *)g_ph.ov->getBuffer();
+  const uint16_t key = g_ph.key_raw;
+  const int W = surf.ph;
+  for (int row = b.y; row < b.y + b.h; row++) {
+    const uint16_t *pa = a ? a + (size_t)row * surf.pw : nullptr, *pt = t + (size_t)row * surf.pw;
+    if (shift > 0 && a) {   // which picture, and which of its rows, this row shows mid-slide
+      const int x = surf.rot == 3 ? surf.ph - 1 - row : row, src_x = x + std::min(shift, W);
+      const int sx = src_x < W ? src_x : src_x - W, srow = surf.rot == 3 ? surf.ph - 1 - sx : sx;
+      pt = (src_x < W ? a : t) + (size_t)srow * surf.pw;
+      pa = nullptr;
+    }
+    const uint16_t *po = ov + (size_t)row * surf.pw;
+    uint16_t *dst = fb + (size_t)row * surf.pw;
+    for (int c = b.x; c < b.x + b.w; c++) {
+      if (po[c] != key) dst[c] = __builtin_bswap16(po[c]);
+      else if (pa && mix < 256) dst[c] = mix565(__builtin_bswap16(pa[c]), __builtin_bswap16(pt[c]), (uint32_t)mix);
+      else dst[c] = __builtin_bswap16(pt[c]);
+    }
+  }
+}
+
+// Canvas -> framebuffer, with the overlay on top. mix 0..256 blends from
+// `from` (0) to `to` (256); shift > 0 slides: the old picture has moved that
+// many logical pixels left and the new one follows it in from the right.
+// The overlay's rectangle is never written without the overlay in it, so
+// the clock stays put through transitions.
 void showFrame(PanelSurface &surf, M5Canvas *from, M5Canvas *to, int mix, int shift) {
   uint16_t *fb = (uint16_t *)surf.fb;
   const uint16_t *a = from ? (const uint16_t *)from->getBuffer() : nullptr;
   const uint16_t *b = (const uint16_t *)to->getBuffer();
   const size_t n = (size_t)surf.pw * surf.ph;
-  if (shift <= 0 && ppaBlend(surf, from, to, mix >= 256 || !a ? 255 : mix)) return;   // hardware; it syncs the caches
+  const Block ob = g_ph.ov && !g_ph.stamped ? panelBlock(surf, g_ph.overlay) : Block();
+  if (shift <= 0) {
+    // Hardware: the frame around the overlay's rectangle, in up to four
+    // blocks; the rectangle itself is done below with the overlay in it.
+    M5Canvas *bg = from && mix < 256 ? from : to;
+    const int alpha = mix >= 256 || !a ? 255 : mix;
+    bool hw;
+    if (ob.w <= 0) hw = ppaBlend(surf, bg, to, alpha);
+    else
+      hw = ppaBlend(surf, bg, to, alpha, {0, 0, surf.pw, ob.y}) &&
+           ppaBlend(surf, bg, to, alpha, {0, ob.y + ob.h, surf.pw, surf.ph - ob.y - ob.h}) &&
+           ppaBlend(surf, bg, to, alpha, {0, ob.y, ob.x, ob.h}) &&
+           ppaBlend(surf, bg, to, alpha, {ob.x + ob.w, ob.y, surf.pw - ob.x - ob.w, ob.h});
+    if (hw) {
+      compositeOverlay(surf, ob, a, b, mix, 0);
+      if (ob.w > 0)
+        esp_cache_msync(fb + (size_t)ob.y * surf.pw, (size_t)ob.h * surf.pw * 2,
+                        ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+      return;
+    }
+  }
   if (shift > 0 && a) {
-    // Logical x runs along panel rows (rotation 3: row = ph-1-x), so each
-    // logical column is one contiguous panel row: copy whole rows.
+    // Each logical column is one contiguous panel row: copy whole rows,
+    // the overlay's rows with the overlay laid in straight after.
     const int W = surf.ph, sh = std::min(shift, surf.ph);
     for (int x = 0; x < W; x++) {
       const int row = surf.rot == 3 ? surf.ph - 1 - x : x;
@@ -768,39 +869,36 @@ void showFrame(PanelSurface &surf, M5Canvas *from, M5Canvas *to, int mix, int sh
       const uint16_t *src = (old ? a : b) + (size_t)srow * surf.pw;
       uint16_t *dst = fb + (size_t)row * surf.pw;
       for (int i = 0; i < surf.pw; i++) dst[i] = __builtin_bswap16(src[i]);
+      if (ob.w > 0 && row >= ob.y && row < ob.y + ob.h) compositeOverlay(surf, {ob.x, row, ob.w, 1}, a, b, 0, shift);
     }
-  } else if (mix >= 256 || !a) {
-    for (size_t i = 0; i < n; i++) fb[i] = __builtin_bswap16(b[i]);
   } else {
-    const uint32_t k = (uint32_t)mix, j = 256 - k;
-    for (size_t i = 0; i < n; i++) {
-      const uint16_t p = __builtin_bswap16(a[i]), q = __builtin_bswap16(b[i]);
-      const uint32_t rb = (((p & 0xF81Fu) * j + (q & 0xF81Fu) * k) >> 8) & 0xF81Fu;
-      const uint32_t g = (((p & 0x07E0u) * j + (q & 0x07E0u) * k) >> 8) & 0x07E0u;
-      fb[i] = (uint16_t)(rb | g);
+    if (mix >= 256 || !a) {
+      for (size_t i = 0; i < n; i++) fb[i] = __builtin_bswap16(b[i]);
+    } else {
+      for (size_t i = 0; i < n; i++) fb[i] = mix565(__builtin_bswap16(a[i]), __builtin_bswap16(b[i]), (uint32_t)mix);
     }
+    compositeOverlay(surf, ob, a, b, mix, 0);
   }
   esp_cache_msync(surf.fb, surf.stride * surf.ph, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
-// Put back what the canvas has under a logical rectangle (before redrawing
-// the clock or a caption over the photo).
+// Redraw a logical rectangle from the current picture plus the overlay.
 void restoreRect(PanelSurface &surf, const Rect &r) {
   if (r.w <= 0 || !g_ph.cur) return;
-  const uint16_t *src = (const uint16_t *)g_ph.cur->getBuffer();
-  uint16_t *fb = (uint16_t *)surf.fb;
-  for (int x = r.x; x < r.x + r.w; x++) {
-    const int row = surf.rot == 3 ? surf.ph - 1 - x : x;
-    const int c0 = surf.rot == 3 ? r.y : surf.pw - (r.y + r.h), c1 = c0 + r.h;
-    for (int c = std::max(0, c0); c < std::min(surf.pw, c1); c++)
-      fb[(size_t)row * surf.pw + c] = __builtin_bswap16(src[(size_t)row * surf.pw + c]);
-  }
-  esp_cache_msync(surf.fb, surf.stride * surf.ph, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
+  const Block b = panelBlock(surf, r);
+  if (b.w <= 0) return;
+  compositeOverlay(surf, b, nullptr, (const uint16_t *)g_ph.cur->getBuffer(), 256, 0);
+  esp_cache_msync((uint16_t *)surf.fb + (size_t)b.y * surf.pw, (size_t)b.h * surf.pw * 2,
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
 }
 
-// The clock and/or a message over the photo, outlined so it reads on any picture.
+// The clock and/or a message over the photo, outlined so it reads on any
+// picture. Drawn into the overlay layer, then put on screen over the photo.
 void drawOverlay(PanelSurface &surf, const PhotoSettings &ps) {
-  restoreRect(surf, g_ph.overlay);
+  if (!g_ph.ov) return;
+  auto &d = *g_ph.ov;
+  const Rect old = g_ph.overlay;
+  if (old.w > 0) d.fillRect(old.x, old.y, old.w, old.h, kOverlayKey);
   g_ph.overlay = {0, 0, 0, 0};
   std::string text;
   if (!g_ph.caption.empty()) text = g_ph.caption;
@@ -809,39 +907,67 @@ void drawOverlay(PanelSurface &surf, const PhotoSettings &ps) {
     if (clock::localNow(&t)) text = flapcore::formatTime(ps.time_format, t);
     g_ph.last_minute = t.tm_min;
   }
-  if (text.empty()) return;
   for (auto &ch : text)
     if (ch == '|' || ch == '\n') ch = ' ';
-  auto &d = M5.Display;
-  const bool caption = !g_ph.caption.empty();
-  d.setFont(caption ? &lgfx::fonts::DejaVu40 : &lgfx::fonts::DejaVu72);   // native sizes: no doubled pixels
-  d.setTextSize(1);
-  const int tw = d.textWidth(text.c_str()), th = d.fontHeight();
-  const int W = d.width(), H = d.height(), m = 36;
-  int x = W - m - tw, y = H - m - th;
-  if (caption) {
-    x = (W - tw) / 2;
-    y = H - m - th;
-  } else if (ps.clock_pos == "bottom_left") {
-    x = m;
-  } else if (ps.clock_pos == "top_right") {
-    y = m;
-  } else if (ps.clock_pos == "top_left") {
-    x = m;
-    y = m;
+  if (!text.empty()) {
+    const bool caption = !g_ph.caption.empty();
+    d.setFont(caption ? &lgfx::fonts::DejaVu40 : &lgfx::fonts::DejaVu72);   // native sizes: no doubled pixels
+    d.setTextSize(1);
+    const int tw = d.textWidth(text.c_str()), th = d.fontHeight();
+    const int W = d.width(), H = d.height(), m = 36;
+    int x = W - m - tw, y = H - m - th;
+    if (caption) {
+      x = (W - tw) / 2;
+      y = H - m - th;
+    } else if (ps.clock_pos == "bottom_left") {
+      x = m;
+    } else if (ps.clock_pos == "top_right") {
+      y = m;
+    } else if (ps.clock_pos == "top_left") {
+      x = m;
+      y = m;
+    }
+    const int rx = std::max(0, x - 24), ry = std::max(0, y - 16);
+    g_ph.overlay = {rx, ry, std::min(W - rx, tw + 48), std::min(H - ry, th + 32)};
+    if (caption) d.fillRoundRect(g_ph.overlay.x, g_ph.overlay.y, g_ph.overlay.w, g_ph.overlay.h, 14, 0x0841);
+    d.setTextDatum(top_left);
+    d.setTextColor(TFT_BLACK);
+    for (int dx = -2; dx <= 2; dx += 2)
+      for (int dy = -2; dy <= 2; dy += 2)
+        if (dx || dy) d.drawString(text.c_str(), x + dx, y + dy);
+    d.setTextColor(TFT_WHITE);
+    d.drawString(text.c_str(), x, y);
   }
-  g_ph.overlay = {std::max(0, x - 24), std::max(0, y - 16), std::min(W, tw + 48), std::min(H, th + 32)};
-  d.startWrite();
-  if (caption) d.fillRoundRect(g_ph.overlay.x, g_ph.overlay.y, g_ph.overlay.w, g_ph.overlay.h, 14, 0x0841);
-  d.setTextDatum(top_left);
-  d.setTextColor(TFT_BLACK);
-  for (int dx = -2; dx <= 2; dx += 2)
-    for (int dy = -2; dy <= 2; dy += 2)
-      if (dx || dy) d.drawString(text.c_str(), x + dx, y + dy);
-  d.setTextColor(TFT_WHITE);
-  d.drawString(text.c_str(), x, y);
-  d.endWrite();
-  d.setTextSize(1);
+  restoreRect(surf, old);            // the photo back where the old text was
+  restoreRect(surf, g_ph.overlay);   // and the new text over it
+}
+
+// For a dissolve: put the overlay into a picture (keeping what was under it)
+// so the hardware blends two pictures with the same clock in the same place
+// -- one full-frame pass, and the clock never changes. unstamp() puts the
+// picture back.
+void stamp(PanelSurface &surf, M5Canvas *cv, std::vector<uint16_t> *saved) {
+  const Block b = panelBlock(surf, g_ph.overlay);
+  saved->clear();
+  if (b.w <= 0) return;
+  uint16_t *px = (uint16_t *)cv->getBuffer();
+  const uint16_t *ov = (const uint16_t *)g_ph.ov->getBuffer();
+  saved->reserve((size_t)b.w * b.h);
+  for (int row = b.y; row < b.y + b.h; row++)
+    for (int c = b.x; c < b.x + b.w; c++) {
+      const size_t i = (size_t)row * surf.pw + c;
+      saved->push_back(px[i]);
+      if (ov[i] != g_ph.key_raw) px[i] = ov[i];
+    }
+}
+
+void unstamp(PanelSurface &surf, M5Canvas *cv, const std::vector<uint16_t> &saved) {
+  const Block b = panelBlock(surf, g_ph.overlay);
+  if (b.w <= 0 || saved.size() != (size_t)b.w * b.h) return;
+  uint16_t *px = (uint16_t *)cv->getBuffer();
+  size_t k = 0;
+  for (int row = b.y; row < b.y + b.h; row++)
+    for (int c = b.x; c < b.x + b.w; c++) px[(size_t)row * surf.pw + c] = saved[k++];
 }
 
 // Shows a new photo with the chosen transition. Returns false if it could not be read.
@@ -859,6 +985,13 @@ bool presentPhoto(PanelSurface &surf, const std::string &rel, bool first) {
   t0 = millis();
   int frames = 0;
   const std::string tr = first ? "cut" : ps.transition;
+  static std::vector<uint16_t> save_cur, save_next;
+  const bool stamping = tr == "dissolve" && g_ph.overlay.w > 0;
+  if (stamping) {
+    stamp(surf, g_ph.cur, &save_cur);
+    stamp(surf, g_ph.next, &save_next);
+    g_ph.stamped = true;
+  }
   if (tr == "dissolve" || tr == "slide") {
     for (;;) {
       const uint32_t e = millis() - t0;
@@ -872,11 +1005,15 @@ bool presentPhoto(PanelSurface &surf, const std::string &rel, bool first) {
     }
   }
   showFrame(surf, nullptr, g_ph.next, 256, 0);
+  if (stamping) {
+    unstamp(surf, g_ph.cur, save_cur);
+    unstamp(surf, g_ph.next, save_next);
+    g_ph.stamped = false;
+  }
   g_ph.transition_ms = millis() - t0;
   g_ph.frames = frames;
   std::swap(g_ph.cur, g_ph.next);
   g_ph.shown = rel;
-  g_ph.overlay = {0, 0, 0, 0};
   drawOverlay(surf, ps);
   note("photo: %s decoded in %lu ms, %s in %lu ms (%d frames)", rel.c_str(), (unsigned long)g_ph.decode_ms, tr.c_str(),
        (unsigned long)g_ph.transition_ms, frames);

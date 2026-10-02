@@ -108,6 +108,10 @@ void setup() {
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);   // never block on a USB console nobody reads
 
+  {
+    const auto prev = previousNotes();
+    if (!prev.empty()) note("previous run ended with: %s", prev.back().c_str());
+  }
   formatCardIfAsked();
   if (sdcard::begin()) makeLibraryFolders();
   else note("sd: not mounted (%s): the file library is unavailable", sdcard::problem());

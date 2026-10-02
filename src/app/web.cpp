@@ -385,7 +385,8 @@ esp_err_t handleVolume(httpd_req_t *req) {
 esp_err_t handleLog(httpd_req_t *req) {
   std::string j = "[";
   bool first = true;
-  for (auto &l : recentNotes()) {
+  // ?prev=1: the end of the run before this start (see note.h)
+  for (auto &l : query(req, "prev") == "1" ? previousNotes() : recentNotes()) {
     j += (first ? "" : ",") + library::jsonStr(l);
     first = false;
   }

@@ -34,7 +34,8 @@
 <button id="restbtn" class="sec">Restore backup...</button><input type="file" id="restfile" accept=".json,application/json" hidden>
 <button id="reboot" class="danger">Restart</button></div>
 <p class="hint">A backup holds the settings and message files. Passwords and photos are not included.</p></section>
-<section class="card"><h2>Recent activity</h2><pre class="log" id="log"></pre></section>
+<section class="card"><h2>Recent activity</h2><pre class="log" id="log"></pre>
+<div class="row"><button class="sec" id="prevbtn">Before the last restart</button></div><pre class="log" id="prevlog" hidden></pre></section>
 </main>
 <script>
 const $=s=>document.querySelector(s);
@@ -120,6 +121,8 @@ $('#restfile').onchange=async function(){const f=this.files[0];this.value='';if(
   if(!up.ok||!up.data.saved){busy(false);note('err',(up.data&&up.data.error)||'Could not send the backup');return}
   const r=await fetch('/api/restore',{method:'POST',body:JSON.stringify({file:up.data.saved[0]})});const d=await r.json();busy(false);
   note(r.ok?'ok':'err',r.ok?'Restored '+d.settings+' settings and '+d.messages+' message files.':d.error);refresh()};
+$('#prevbtn').onclick=async()=>{const p=$('#prevlog');if(!p.hidden){p.hidden=true;return}
+  try{const l=await (await fetch('/api/log?prev=1')).json();p.textContent=l.length?l.join('\n'):'Nothing kept (the last start was a power-up).';p.hidden=false}catch(e){}};
 $('#reboot').onclick=async()=>{if(!confirm('Restart the sign?'))return;await fetch('/api/reboot',{method:'POST'});note('ok','Restarting...')};
 refresh();setInterval(refresh,5000);
 </script></body></html>

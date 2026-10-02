@@ -9,6 +9,8 @@
 namespace flapboard {
 
 void note(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+// Serial only, kept out of the web page's activity log (frequent diagnostics).
+void trace(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 std::vector<std::string> recentNotes();
 // While a binary transfer (screenshot, file get/put) owns the serial port,
 // notes still go to the ring but not to serial: a line printed from another

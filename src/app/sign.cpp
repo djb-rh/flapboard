@@ -1080,7 +1080,7 @@ void renderTask(void *) {
     }
     if (now - last_report >= 2000) {
       if (g_stats.frames) {
-        note("sign: %lu frames, %lu cells/frame avg (max %lu), draw %.2f ms avg (max %.2f), per cell %.3f ms",
+        trace("sign: %lu frames, %lu cells/frame avg (max %lu), draw %.2f ms avg (max %.2f), per cell %.3f ms",
              (unsigned long)g_stats.frames, (unsigned long)(g_stats.cells / g_stats.frames),
              (unsigned long)g_stats.max_cells, g_stats.draw_us / 1000.0f / g_stats.frames, g_stats.max_us / 1000.0f,
              g_stats.draw_us / 1000.0f / g_stats.cells);

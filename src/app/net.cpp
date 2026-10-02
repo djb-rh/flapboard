@@ -18,7 +18,7 @@
 #include "config.h"
 #include "note.h"
 
-#if __has_include("secrets.h")
+#if __has_include("secrets.h") && !defined(FLAPBOARD_RELEASE)
 #include "secrets.h"   // gitignored developer seed: WIFI_SSID / WIFI_PASSWORD
 #endif
 

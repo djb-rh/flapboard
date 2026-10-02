@@ -29,6 +29,9 @@ std::string toJson();
 // Applies the keys in `patch` that exist in the defaults with a compatible
 // type; anything else is refused and named in *error. Saves on success.
 bool apply(JsonVariantConst patch, std::string *error);
+// For restoring a backup: applies the keys this firmware knows, skips the
+// rest (a backup from an older or newer version), returns how many applied.
+int applyKnown(JsonVariantConst patch);
 
 // Convenience getters.
 std::string deviceName();

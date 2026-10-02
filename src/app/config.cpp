@@ -196,6 +196,21 @@ bool apply(JsonVariantConst patch, std::string *error) {
   return true;
 }
 
+int applyKnown(JsonVariantConst patch) {
+  int n = 0;
+  {
+    Reader r;
+    for (JsonPairConst kv : patch.as<JsonObjectConst>()) {
+      JsonVariantConst def = g_defaults[kv.key()];
+      if (def.isNull() || !compatible(def, kv.value())) continue;
+      g_doc[kv.key()] = kv.value();
+      n++;
+    }
+    if (n) save();
+  }
+  return n;
+}
+
 std::string deviceName() {
   Reader r;
   std::string n = g_doc["device_name"] | "FlapBoard";

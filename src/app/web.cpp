@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <esp_heap_caps.h>
 #include <esp_http_server.h>
+#include <esp_ota_ops.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -707,6 +708,143 @@ esp_err_t handleLibUploadPart(httpd_req_t *req) {
   return sendJson(req, 200, "{\"saved\":[" + library::jsonStr(saved) + "],\"skipped\":[]}");
 }
 
+// ---- firmware update -------------------------------------------------------------
+//
+// POST /api/ota?id=<id>&offset=<n>&total=<size>, body = the next piece of the
+// .bin (<= 16 KB, the same reason as uploads). Written straight into the
+// spare app slot; the last piece checks the image, makes it the boot slot and
+// restarts. The bootloader's rollback is on: the new firmware runs on trial
+// and main.cpp marks it good once it is healthy, else the next restart goes
+// back to the old one.
+struct OtaState {
+  std::string id;
+  esp_ota_handle_t handle = 0;
+  const esp_partition_t *part = nullptr;
+  long next = 0;
+} g_ota;
+volatile uint32_t g_ota_seen_ms = 0;   // last piece; 0 = no update under way
+volatile bool g_ota_done = false;
+
+esp_err_t handleOta(httpd_req_t *req) {
+  net::markUploading();
+  g_ota_seen_ms = millis() | 1;
+  const std::string id = query(req, "id");
+  const long offset = atol(query(req, "offset").c_str()), total = atol(query(req, "total").c_str());
+  if (id.empty() || req->content_len > 65536 || total < offset + (long)req->content_len || total > 6 * 1024 * 1024)
+    return sendError(req, 400, "bad piece");
+  if (offset == 0) {
+    if (g_ota.handle) esp_ota_abort(g_ota.handle);
+    g_ota = OtaState();
+    g_ota.part = esp_ota_get_next_update_partition(nullptr);
+    if (!g_ota.part) return sendError(req, 500, "no spare firmware slot (partition table)");
+    // Sequential writes: each sector is erased as it is reached, not all 6 MB up front.
+    if (esp_ota_begin(g_ota.part, OTA_WITH_SEQUENTIAL_WRITES, &g_ota.handle) != ESP_OK)
+      return sendError(req, 500, "could not start the update");
+    g_ota.id = id;
+    note("update: receiving %ld bytes into %s", total, g_ota.part->label);
+  } else if (id != g_ota.id || offset != g_ota.next) {
+    return sendError(req, 409, "update pieces out of order; start again");
+  }
+  size_t left = req->content_len;
+  int timeouts = 0;
+  while (left > 0) {
+    const int n = httpd_req_recv(req, g_buf, left < kChunk ? left : kChunk);
+    if (n == HTTPD_SOCK_ERR_TIMEOUT && ++timeouts < 3) continue;
+    if (n <= 0) return ESP_FAIL;   // the browser retries this piece (offset unchanged)
+    if (esp_ota_write(g_ota.handle, g_buf, n) != ESP_OK) {
+      esp_ota_abort(g_ota.handle);
+      g_ota = OtaState();
+      return sendError(req, 500, "writing the update failed");
+    }
+    g_ota.next += n;
+    left -= n;
+    timeouts = 0;
+    net::markBusy();
+  }
+  if (g_ota.next < total) return sendJson(req, 200, "{\"received\":" + std::to_string(g_ota.next) + "}");
+  const esp_err_t e = esp_ota_end(g_ota.handle);   // checks the image (magic, size, SHA-256)
+  g_ota.handle = 0;
+  if (e != ESP_OK) {
+    g_ota = OtaState();
+    return sendError(req, 400, e == ESP_ERR_OTA_VALIDATE_FAILED ? "that is not a FlapBoard firmware image" : "the update did not verify");
+  }
+  if (esp_ota_set_boot_partition(g_ota.part) != ESP_OK) return sendError(req, 500, "could not switch to the new firmware");
+  note("update: %ld bytes written to %s; restarting into it", total, g_ota.part->label);
+  g_ota_done = true;
+  g_reboot = true;
+  return sendJson(req, 200, "{\"done\":true}");
+}
+
+// ---- backup and restore ------------------------------------------------------------
+
+// Settings and message files as one JSON download. No passwords (Wi-Fi and
+// MQTT stay on the sign), no photos (too big; copy the card for those).
+esp_err_t handleBackup(httpd_req_t *req) {
+  JsonDocument d;
+  d["flapboard_backup"] = 1;
+  d["version"] = FLAPBOARD_VERSION;
+  d["device_name"] = config::deviceName();
+  JsonDocument cfg;
+  deserializeJson(cfg, config::toJson());
+  d["settings"] = cfg;
+  std::vector<library::Entry> files;
+  if (library::list("messages", &files) == library::Err::Ok) {
+    for (auto &e : files) {
+      if (e.dir || e.size > 64 * 1024) continue;
+      std::string abs;
+      if (library::resolve(e.path, &abs) != library::Err::Ok) continue;
+      FILE *f = fopen(abs.c_str(), "rb");
+      if (!f) continue;
+      std::string text(e.size, '\0');
+      const size_t n = fread(&text[0], 1, e.size, f);
+      fclose(f);
+      text.resize(n);
+      d["messages"][e.name] = text;
+    }
+  }
+  std::string out;
+  serializeJson(d, out);
+  httpd_resp_set_type(req, "application/json");
+  const std::string disp = "attachment; filename=\"" + config::hostname() + "-backup.json\"";
+  httpd_resp_set_hdr(req, "Content-Disposition", disp.c_str());
+  return httpd_resp_send(req, out.data(), out.size());
+}
+
+// {"file": "<library path of an uploaded backup>"}: applies its settings
+// (keys this firmware knows) and writes its message files, then deletes it.
+esp_err_t handleRestore(httpd_req_t *req) {
+  std::string body;
+  if (!readBody(req, &body, 1024)) return sendError(req, 400, "request too large");
+  JsonDocument q;
+  if (deserializeJson(q, body)) return sendError(req, 400, "invalid JSON");
+  std::string abs;
+  if (library::resolve(q["file"] | "", &abs) != library::Err::Ok) return sendError(req, 400, "path not allowed");
+  FILE *f = fopen(abs.c_str(), "rb");
+  if (!f) return sendError(req, 404, "the backup file was not found");
+  std::string text;
+  size_t n;
+  while ((n = fread(g_buf, 1, kChunk, f)) > 0 && text.size() < 2 * 1024 * 1024) text.append(g_buf, n);
+  fclose(f);
+  remove(abs.c_str());
+  JsonDocument d;
+  if (deserializeJson(d, text) || !(d["flapboard_backup"] | 0)) return sendError(req, 400, "that is not a FlapBoard backup");
+  const int applied = config::applyKnown(d["settings"]);
+  int written = 0;
+  for (JsonPairConst kv : d["messages"].as<JsonObjectConst>()) {
+    std::string name = kv.key().c_str(), dest;
+    if (library::validateName(name) != library::Err::Ok || library::resolve("messages/" + name, &dest) != library::Err::Ok) continue;
+    FILE *o = fopen(dest.c_str(), "wb");
+    if (!o) continue;
+    const std::string t = kv.value().as<std::string>();
+    fwrite(t.data(), 1, t.size(), o);
+    fclose(o);
+    written++;
+  }
+  content::libraryChanged();
+  note("restore: %d settings, %d message files from a %s backup", applied, written, (const char *)(d["version"] | "?"));
+  return sendJson(req, 200, "{\"settings\":" + std::to_string(applied) + ",\"messages\":" + std::to_string(written) + "}");
+}
+
 esp_err_t handleLibOp(httpd_req_t *req) {
   std::string body;
   if (!readBody(req, &body)) return sendError(req, 400, "request too large");
@@ -748,7 +886,7 @@ void begin() {
   g_buf = (char *)heap_caps_malloc(kChunk, MALLOC_CAP_SPIRAM);
   httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
   cfg.stack_size = 10240;
-  cfg.max_uri_handlers = 64;
+  cfg.max_uri_handlers = 72;
   cfg.uri_match_fn = httpd_uri_match_wildcard;   // for /fonts/*
   cfg.lru_purge_enable = true;
   cfg.recv_wait_timeout = 20;
@@ -801,6 +939,9 @@ void begin() {
       {"/library/thumb", HTTP_GET, handleLibThumb},
       {"/library/upload", HTTP_POST, handleLibUpload},
       {"/library/upload_part", HTTP_POST, handleLibUploadPart},
+      {"/api/ota", HTTP_POST, handleOta},
+      {"/api/backup", HTTP_GET, handleBackup},
+      {"/api/restore", HTTP_POST, handleRestore},
       {"/library/mkdir", HTTP_POST, handleLibOp},
       {"/library/delete", HTTP_POST, handleLibOp},
       {"/library/rename", HTTP_POST, handleLibOp},
@@ -813,6 +954,11 @@ void begin() {
     httpd_register_uri_handler(g_server, &u);
   }
   httpd_register_err_handler(g_server, HTTPD_404_NOT_FOUND, handleOther);
+}
+
+bool updating() {
+  const uint32_t seen = g_ota_seen_ms;
+  return g_ota_done || (seen && millis() - seen < 30000);
 }
 
 bool takeRebootRequest() {

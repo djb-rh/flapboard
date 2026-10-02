@@ -35,6 +35,18 @@ void note(const char *fmt, ...) {
   xSemaphoreGive(g_mux);
 }
 
+void trace(const char *fmt, ...) {
+  if (g_quiet) return;
+  char text[240];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(text, sizeof(text), fmt, ap);
+  va_end(ap);
+  const uint32_t s = millis() / 1000;
+  Serial.printf("[%02lu:%02lu:%02lu] %s\n", (unsigned long)(s / 3600), (unsigned long)(s / 60 % 60),
+                (unsigned long)(s % 60), text);
+}
+
 void setSerialQuiet(bool quiet) { g_quiet = quiet; }
 
 std::vector<std::string> recentNotes() {

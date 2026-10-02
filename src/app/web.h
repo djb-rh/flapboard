@@ -10,6 +10,10 @@ void begin();   // after net::begin() (needs the network stack up)
 
 // Asked for by the browser, done by the main loop.
 bool takeRebootRequest();
+// A firmware update is being received (a piece arrived in the last 30 s, or
+// it finished and the restart is pending). Flash writes upset the display
+// (white flashes), so the screen is blanked meanwhile.
+bool updating();
 
 }  // namespace web
 }  // namespace flapboard

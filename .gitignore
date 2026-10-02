@@ -6,3 +6,4 @@ include/secrets.h
 dist/
 src/app/generated/
 build/
+site/

@@ -7,6 +7,7 @@
 #include <esp_heap_caps.h>
 #include <esp_log.h>
 #include <esp_netif.h>
+#include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
 #include <sys/stat.h>
 
@@ -28,6 +29,10 @@
 #include "status.h"
 #include "weather.h"
 #include "web.h"
+
+// Arduino's startup marks a new firmware good before setup() runs unless
+// this says otherwise; FlapBoard decides itself, once Wi-Fi is up (loop()).
+extern "C" bool verifyRollbackLater() { return true; }
 
 using namespace flapboard;
 
@@ -156,6 +161,22 @@ void loop() {
       content::next();
     } else if (a.kind == sign::ActionKind::ShowIp) {
       content::showOverride("{name}||{hostname}|{ip}", 30);
+    }
+  }
+  // A firmware that arrived over the air runs on trial (bootloader rollback):
+  // once it has been up 30 s with Wi-Fi joined and the web server answering,
+  // it is kept; a firmware that never gets that far is rolled back on restart.
+#ifdef FLAPBOARD_CRASH_TEST
+  if (millis() > 10000) abort();   // test build only: proves a bad update rolls back
+#endif
+  static bool marked = false;
+  if (!marked && millis() > 30000 && net::state() == net::State::Connected) {
+    marked = true;
+    esp_ota_img_states_t st;
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    if (esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
+      esp_ota_mark_app_valid_cancel_rollback();
+      note("update: firmware %s on %s confirmed after a healthy start", FLAPBOARD_VERSION, run->label);
     }
   }
   if (web::takeRebootRequest()) {

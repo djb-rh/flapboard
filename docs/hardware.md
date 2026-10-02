@@ -126,3 +126,18 @@ Per cell, on-device `bench` (serial):
   smaller TCP window, slower SDIO clock, mbedTLS in PSRAM, more VFS slots.
 - Joining: the default fast scan took the first access point heard (a far one at -93 dBm with a near one
   available). Now all-channel scan + strongest signal, and roaming when weak (rare scans: they can wedge too).
+
+## Firmware updates and release images (Phase 10, 2026-10-02)
+- OTA from the web page in 16 KB pieces (`/api/ota`), sequential writes into the spare slot: ~85-100 KB/s,
+  ~35 s for a 3 MB image. Verified ota_0 -> ota_1 -> ota_0 several times.
+- **Arduino marks every new app valid before setup()** unless `verifyRollbackLater()` returns true
+  (weak, in esp32-hal-misc.c). Without the override the rollback-enabled bootloader never got a say.
+  Now the app is confirmed from loop() once up 30 s with Wi-Fi joined; `/api/status` shows `app_trial`.
+- Rollback test: an update that `abort()`s 10 s after boot -> panic (reset reason 4) -> bootloader went
+  back to the previous slot by itself, ~12 s of downtime.
+- **Flash writes make the MIPI-DSI panel flash white** (framebuffer reads stall while the cache is off
+  for each sector erase/write). SD-card uploads don't do this. The backlight is now off while an update
+  is received (`web::updating()`, cleared 30 s after the last piece if abandoned).
+- Release builds define `FLAPBOARD_RELEASE`, which drops the developer Wi-Fi seed in `secrets.h`;
+  tools/release.sh fails if the SSID is found in the image (`LC_ALL=C grep -a`: plain grep on the
+  binary silently matched nothing). The Arduino libs have no exFAT: SD cards must be FAT32.

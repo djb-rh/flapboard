@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FlapBoard</title><link rel="stylesheet" href="/style.css">
-<style>.vol{display:flex;gap:14px;align-items:center}.vol input{flex:1;accent-color:var(--accent)}.vol output{min-width:4.5em;text-align:right;font-variant-numeric:tabular-nums}</style></head><body>
+<style>.prog{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin:0 0 12px;display:none}.prog i{display:block;height:100%;background:var(--accent);width:0}.vol{display:flex;gap:14px;align-items:center}.vol input{flex:1;accent-color:var(--accent)}.vol output{min-width:4.5em;text-align:right;font-variant-numeric:tabular-nums}</style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
 <nav><a href="/" class="on">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
 <main>
@@ -27,7 +27,13 @@
 <section class="card"><h2>Wi-Fi chip</h2><dl id="c6"></dl>
 <div class="row"><button id="c6up" class="sec" disabled>Update Wi-Fi chip firmware</button></div></section>
 <section class="card"><h2>System</h2>
-<div class="row"><button id="reboot" class="danger">Restart</button></div></section>
+<p class="hint" id="fwline"></p>
+<div class="prog" id="prog"><i id="progbar"></i></div>
+<div class="row"><button id="fwbtn" class="sec">Update firmware...</button><input type="file" id="fwfile" accept=".bin" hidden>
+<button id="backup" class="sec">Download backup</button>
+<button id="restbtn" class="sec">Restore backup...</button><input type="file" id="restfile" accept=".json,application/json" hidden>
+<button id="reboot" class="danger">Restart</button></div>
+<p class="hint">A backup holds the settings and message files. Passwords and photos are not included.</p></section>
 <section class="card"><h2>Recent activity</h2><pre class="log" id="log"></pre></section>
 </main>
 <script>
@@ -57,6 +63,7 @@ async function refresh(){
       ['Memory','internal '+size(s.memory.internal_free)+', largest DMA '+size(s.memory.dma_largest)+', PSRAM '+size(s.memory.psram_free)],
       ['Link watchdog',w.pings_ok+' pings ok, '+w.pings_lost+' lost, '+w.watchdog_restarts+' restarts'],
       ['Up',up(s.uptime_s)],['Firmware',esc(s.version)]];
+    $('#fwline').textContent='Running FlapBoard '+s.version+(s.app_slot?' from '+s.app_slot:'')+'.';
     $('#st').innerHTML=rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('');
     const c=s.wifi_chip;
     $('#c6').innerHTML='<dt>Firmware</dt><dd>'+esc(c.firmware)+'</dd><dt>This build expects</dt><dd>'+esc(c.expected)+'</dd><dt>State</dt><dd>'+(c.update_available?'<span class="warn">update available</span>':'<span class="good">matches</span>')+'</dd>';
@@ -78,6 +85,41 @@ async function mqRefresh(){try{const m=await (await fetch('/api/mqtt')).json();$
 $('#mqsave').onclick=async()=>{const r=await fetch('/api/mqtt',{method:'POST',body:JSON.stringify({host:$('#mqh').value.trim(),port:+$('#mqp').value||1883,user:$('#mqu').value.trim(),password:$('#mqw').value})});
   $('#mqw').value='';note(r.ok?'ok':'err',r.ok?'Saved. Connecting...':'Could not save');setTimeout(mqRefresh,4000)};
 mqRefresh();setInterval(mqRefresh,8000);
+// Firmware and backups go up in 16 KB pieces, the size the Tab5's Wi-Fi
+// link takes reliably; a piece that fails is retried with the same offset.
+async function pieces(url,params,blob,onProgress){
+  const id=Math.random().toString(36).slice(2,12),total=blob.size,piece=16384;let off=0,last=null;
+  do{const body=blob.slice(off,off+piece);let ok=false;
+    for(let a=0;a<4&&!ok;a++){if(a)await new Promise(r=>setTimeout(r,1500*a));
+      try{const q=new URLSearchParams({...params,id,offset:off,total});
+        const r=await fetch(url+'?'+q,{method:'POST',body});last=await r.json();
+        if(r.ok)ok=true;else if(r.status<500&&r.status!==409)return{ok:false,data:last}}catch(e){last={error:'connection lost'}}}
+    if(!ok)return{ok:false,data:last||{error:'connection lost'}};
+    off+=body.size;onProgress(off/total)}while(off<total);
+  return{ok:true,data:last}}
+function bar(f){$('#prog').style.display=f===null?'none':'block';$('#progbar').style.width=((f||0)*100)+'%'}
+function busy(b){['#fwbtn','#backup','#restbtn','#reboot'].forEach(k=>$(k).disabled=b)}
+$('#fwbtn').onclick=()=>$('#fwfile').click();
+$('#fwfile').onchange=async function(){const f=this.files[0];this.value='';if(!f)return;
+  if(!confirm('Install '+f.name+' ('+size(f.size)+')? The sign restarts into it. If it cannot start and join Wi-Fi, the next restart goes back to the current firmware.'))return;
+  busy(true);bar(0);note('ok','Sending firmware... keep this page open.');
+  const r=await pieces('/api/ota',{},f,bar);bar(null);
+  if(!r.ok){busy(false);note('err',r.data.error||'Update failed');return}
+  note('ok','Installed. Restarting into the new firmware; this page reloads when the sign is back.');
+  const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store'})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
+    if(Date.now()-t0<180000)setTimeout(wait,3000);else{busy(false);note('err','The sign has not come back yet. Check it, then reload this page.')}},8000)};
+$('#backup').onclick=()=>{location.href='/api/backup'};
+$('#restbtn').onclick=()=>$('#restfile').click();
+$('#restfile').onchange=async function(){const f=this.files[0];this.value='';if(!f)return;
+  let j;try{j=JSON.parse(await f.text())}catch(e){note('err','That file is not a backup');return}
+  if(!j.flapboard_backup){note('err','That file is not a FlapBoard backup');return}
+  const n=Object.keys(j.messages||{}).length;
+  if(!confirm('Restore settings'+(n?' and '+n+' message file'+(n>1?'s':''):'')+' from '+f.name+(j.device_name?' ('+j.device_name+', '+j.version+')':'')+'? Message files with the same names are replaced.'))return;
+  busy(true);bar(0);
+  const up=await pieces('/library/upload_part',{path:'',name:'restore.json'},f,bar);bar(null);
+  if(!up.ok||!up.data.saved){busy(false);note('err',(up.data&&up.data.error)||'Could not send the backup');return}
+  const r=await fetch('/api/restore',{method:'POST',body:JSON.stringify({file:up.data.saved[0]})});const d=await r.json();busy(false);
+  note(r.ok?'ok':'err',r.ok?'Restored '+d.settings+' settings and '+d.messages+' message files.':d.error);refresh()};
 $('#reboot').onclick=async()=>{if(!confirm('Restart the sign?'))return;await fetch('/api/reboot',{method:'POST'});note('ok','Restarting...')};
 refresh();setInterval(refresh,5000);
 </script></body></html>

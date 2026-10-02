@@ -4,6 +4,7 @@
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <esp_heap_caps.h>
+#include <esp_ota_ops.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
@@ -56,6 +57,12 @@ std::string rtcText() {
 std::string json() {
   JsonDocument d;
   d["version"] = FLAPBOARD_VERSION;
+  if (const esp_partition_t *run = esp_ota_get_running_partition()) {
+    d["app_slot"] = run->label;
+    esp_ota_img_states_t st;
+    // "trial": a new firmware not yet confirmed healthy (rolls back if it restarts now).
+    d["app_trial"] = esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
+  }
   d["device_name"] = config::deviceName();
   d["hostname"] = config::hostname() + ".local";
   d["uptime_s"] = millis() / 1000;

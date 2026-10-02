@@ -1,4 +1,5 @@
 #include "power.h"
+#include "web.h"
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
@@ -174,7 +175,15 @@ void loop() {
   in.motion = motion::state((uint32_t)std::max(1, motion_min) * 60000);
   (void)wake_min;
   const schedule::Power p = schedule::choosePower(in);
-  if (p.on != g_on || p.reason != g_reason || (p.on && brightness != g_brightness)) {
+  // During a firmware update the screen stays dark (see web::updating);
+  // afterwards g_brightness = -1 makes the block below light it again.
+  static bool updating = false;
+  if (web::updating() != updating) {
+    updating = !updating;
+    if (updating) apply(false, 0);
+    else g_brightness = -1;
+  }
+  if (!updating && (p.on != g_on || p.reason != g_reason || (p.on && brightness != g_brightness))) {
     if (p.on != g_on) note("power: %s (%s)", p.on ? "on" : "off", p.reason.c_str());
     if (p.on != g_on || brightness != g_brightness) apply(p.on, brightness);
     if (p.on != g_on) motion::powerChanged();   // the scene's lighting just changed

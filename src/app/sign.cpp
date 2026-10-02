@@ -398,9 +398,9 @@ void drawPanel() {
   const uint64_t fb = st["sd"]["free_bytes"] | 0ULL;
   const std::string sdp = st["sd"]["problem"] | "";
   if (st["sd"]["mounted"] | false) snprintf(b, sizeof(b), "ready, %.1f GB free", fb / 1e9);
-  else if (sdp == "none") snprintf(b, sizeof(b), "NO CARD (insert one, then restart)");
-  else snprintf(b, sizeof(b), "%s: format it from the web page (Files)",
-                sdp == "exfat" ? "exFAT, CAN'T READ" : sdp == "ntfs" ? "NTFS, CAN'T READ" : sdp == "unformatted" ? "NOT FORMATTED" : "CAN'T READ");
+  else if (sdp == "none") snprintf(b, sizeof(b), "NO CARD: insert one, restart");
+  else snprintf(b, sizeof(b), "%s: format it in Files",   // the web page's Files tab
+                sdp == "exfat" ? "exFAT" : sdp == "ntfs" ? "NTFS" : sdp == "unformatted" ? "NOT FORMATTED" : "CAN'T READ");
   line("SD CARD", b, (st["sd"]["mounted"] | false) ? ink : warn);
   const uint32_t up = st["uptime_s"] | 0;
   snprintf(b, sizeof(b), "v%s  chip %s  up %luh%02lum", FLAPBOARD_VERSION, (const char *)(st["wifi_chip"]["firmware"] | "?"),

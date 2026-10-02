@@ -27,6 +27,11 @@ SemaphoreHandle_t g_mux = xSemaphoreCreateMutex();
 std::string g_rtc = "";
 int g_batt_mv = 0, g_batt_pct = 0, g_batt_ma = 0;
 uint32_t g_last = 0;
+// Firmware slot and trial state: reading them touches flash (otadata), which
+// the render and sound tasks (PSRAM stacks) must never do, so the main loop
+// reads them here and json() uses the copy.
+const char *g_app_slot = "";
+bool g_app_trial = false;
 
 }  // namespace
 
@@ -39,7 +44,12 @@ void update() {
            dt.time.hours, dt.time.minutes, dt.time.seconds);
   const int mv = M5.Power.getBatteryVoltage(), pct = M5.Power.getBatteryLevel();
   const int ma = (int)M5.Power.getBatteryCurrent();
+  const esp_partition_t *run = esp_ota_get_running_partition();
+  esp_ota_img_states_t st;
+  const bool trial = run && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
   xSemaphoreTake(g_mux, portMAX_DELAY);
+  g_app_slot = run ? run->label : "";
+  g_app_trial = trial;
   g_rtc = t;
   g_batt_mv = mv;
   g_batt_pct = pct;
@@ -57,12 +67,10 @@ std::string rtcText() {
 std::string json() {
   JsonDocument d;
   d["version"] = FLAPBOARD_VERSION;
-  if (const esp_partition_t *run = esp_ota_get_running_partition()) {
-    d["app_slot"] = run->label;
-    esp_ota_img_states_t st;
-    // "trial": a new firmware not yet confirmed healthy (rolls back if it restarts now).
-    d["app_trial"] = esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
-  }
+  xSemaphoreTake(g_mux, portMAX_DELAY);
+  d["app_slot"] = g_app_slot;
+  d["app_trial"] = g_app_trial;   // a new firmware not yet confirmed healthy (rolls back if it restarts now)
+  xSemaphoreGive(g_mux);
   d["device_name"] = config::deviceName();
   d["hostname"] = config::hostname() + ".local";
   d["uptime_s"] = millis() / 1000;

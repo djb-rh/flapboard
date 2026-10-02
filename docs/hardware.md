@@ -148,3 +148,7 @@ Per cell, on-device `bench` (serial):
   and restarts; `formatCardIfAsked()` formats before Wi-Fi and before the task watchdog starts.
 - OTA's first piece waits (<= 600 ms) until the main loop has blanked the screen: before that, the first
   sector erase gave two quick white flashes.
+- Crash found 2026-10-02: the info sheet (render task, PSRAM stack) builds `status::json()`, and Phase 10 had
+  put `esp_ota_get_state_partition()` (an otadata flash read) in it -> `esp_task_stack_is_sane_cache_disabled`
+  assert on every long press. The slot/trial state is now read in `status::update()` on the main loop. Rule
+  stands: anything the render task calls must not touch flash, including "harmless" reads behind an API.

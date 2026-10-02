@@ -664,8 +664,18 @@ esp_err_t handleLibUploadPart(httpd_req_t *req) {
   }
   const std::string tmp = dir + "/.part-" + id;
   if (offset == 0) remove(tmp.c_str());
-  else if (stat(tmp.c_str(), &st) != 0 || st.st_size != offset)
-    return sendError(req, 409, "pieces arrived out of order; start the upload again");
+  else if (stat(tmp.c_str(), &st) != 0 || st.st_size < offset) {
+    // A gap (a restart lost the end of the file): tell the sender where to resume.
+    const long have = stat(tmp.c_str(), &st) == 0 ? (long)st.st_size : 0;
+    return sendJson(req, 409, "{\"error\":\"resume from an earlier piece\",\"have\":" + std::to_string(have) + "}");
+  } else if (st.st_size > offset) {
+    // The same piece again (its reply was lost, or the sign restarted while
+    // writing it): drop what came after `offset` and take it again.
+    if (FILE *t = fopen(tmp.c_str(), "r+b")) {
+      ftruncate(fileno(t), offset);
+      fclose(t);
+    }
+  }
   FILE *f = fopen(tmp.c_str(), offset == 0 ? "wb" : "ab");
   if (!f) return sendError(req, 500, "cannot write to the SD card");
   size_t left = req->content_len;

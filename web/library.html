@@ -137,15 +137,25 @@ async function shrinkPhoto(f){
 // Sends a file to the sign in 16 KB pieces (/library/upload_part). The
 // Tab5's Wi-Fi chip wedges on large inbound bursts; a request never bursts
 // more than its own body. Each piece is retried; onProgress(0..1).
+// If the sign stops answering (its Wi-Fi watchdog restarts it, ~40 s), wait
+// for it to come back and carry on from the same piece; a 409 says where the
+// sign's copy ends, and the upload resumes from there.
+async function signBack(maxMs){const t0=Date.now();
+  while(Date.now()-t0<maxMs){try{const r=await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(3000)});if(r.ok)return true}catch(e){}
+    await new Promise(r=>setTimeout(r,2000))}return false}
 async function putInPieces(folder,name,blob,onProgress,thumb){
   const id=Math.random().toString(36).slice(2,12),total=blob.size,piece=16384;let off=0,last=null;
-  do{const body=blob.slice(off,off+piece);let ok=false;
-    for(let a=0;a<4&&!ok;a++){if(a)await new Promise(r=>setTimeout(r,1500*a));
+  do{let ok=false;
+    for(let a=0;a<6&&!ok;a++){if(a)await new Promise(r=>setTimeout(r,1000*a));
+      const body=blob.slice(off,off+piece);
       try{const q=new URLSearchParams({path:folder,name,id,offset:off,total});if(thumb)q.set('thumb','1');
-        const r=await fetch('/library/upload_part?'+q,{method:'POST',body});last=await r.json();
-        if(r.ok)ok=true;else if(r.status<500&&r.status!==409)return{ok:false,data:last,status:r.status}}catch(e){last={error:'connection lost'}}}
+        const r=await fetch('/library/upload_part?'+q,{method:'POST',body,signal:AbortSignal.timeout(30000)});last=await r.json();
+        if(r.ok){ok=true;off+=body.size}
+        else if(r.status===409&&typeof last.have==='number'&&last.have<off){off=last.have}   // resume where the sign's copy ends
+        else if(r.status<500&&r.status!==409)return{ok:false,data:last,status:r.status}}
+      catch(e){last={error:'connection lost'};if(a>=1&&!await signBack(120000))break}}
     if(!ok)return{ok:false,data:last||{error:'connection lost'},status:0};
-    off+=body.size;if(onProgress)onProgress(total?off/total:1)}while(off<total);
+    if(onProgress)onProgress(total?off/total:1)}while(off<total);
   return{ok:true,data:last,status:200}}
 function sendOne(f,buf,onProgress,thumb,dir){return putInPieces(dir==null?cwd:dir,f.name,new Blob([buf],{type:f.type||'application/octet-stream'}),onProgress,thumb)}
 function sendOneMultipart(f,buf,onProgress,thumb){return new Promise(resolve=>{

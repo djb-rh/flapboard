@@ -14,22 +14,29 @@ def post(path, data, ctype='application/octet-stream'):
         return json.load(r)
 
 def put(folder, name, data, thumb=False):
+    """One file in pieces. Survives the sign restarting mid-file: pieces are
+    retried for ~2 minutes, and a 409 says where the sign's copy ends."""
     uid = ''.join(random.choices(string.ascii_lowercase, k=10)); off = 0; last = None
     while off < len(data):
         body = data[off:off + 16384]
         q = {'path': folder, 'name': name, 'id': uid, 'offset': off, 'total': len(data)}
         if thumb: q['thumb'] = 1
-        for a in range(5):
+        t0 = time.time()
+        while True:
             try:
-                last = post('/library/upload_part?' + urllib.parse.urlencode(q), body); break
+                last = post('/library/upload_part?' + urllib.parse.urlencode(q), body)
+                off += len(body); break
             except urllib.error.HTTPError as e:
+                info = {}
+                try: info = json.loads(e.read())
+                except Exception: pass
+                if e.code == 409 and isinstance(info.get('have'), int) and info['have'] < off:
+                    off = info['have']; break       # resume where the sign's copy ends
                 if e.code < 500 and e.code != 409: raise
-                time.sleep(1.5 * (a + 1))
             except Exception:
-                time.sleep(1.5 * (a + 1))
-        else:
-            raise RuntimeError('piece failed after retries')
-        off += len(body)
+                pass
+            if time.time() - t0 > 150: raise RuntimeError('the sign stopped answering')
+            time.sleep(3)
     return last
 
 parent, leaf = os.path.split(dest)

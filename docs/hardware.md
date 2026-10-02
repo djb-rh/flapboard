@@ -152,3 +152,8 @@ Per cell, on-device `bench` (serial):
   put `esp_ota_get_state_partition()` (an otadata flash read) in it -> `esp_task_stack_is_sane_cache_disabled`
   assert on every long press. The slot/trial state is now read in `status::update()` on the main loop. Rule
   stands: anything the render task calls must not touch flash, including "harmless" reads behind an API.
+- 2026-10-02: a sustained 59 MB upload (177 photos, ~170 KB/s, 16 KB pieces) wedged the link once, after
+  ~45 s of transfer; the link watchdog restarted the sign and the uploader carried on. Uploads now survive
+  that: the sign takes a repeated piece (truncates back to its offset), answers a gap with 409 {"have":n},
+  and the browser / tools/put_folder.py wait up to ~2 min for the sign to come back. The carried-over log
+  (`/api/log?prev=1`) is what showed the wedge.

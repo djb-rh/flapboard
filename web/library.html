@@ -71,6 +71,23 @@ async function go(path){cwd=path||'';
     if(!r.ok){note('err',d.error||'Could not open folder');return}render(d)}catch(e){note('err','Could not reach the sign')}}
 function icon(e){if(e.type==='dir')return'&#128193;';if(e.is_image)return'&#128247;';
   const x=e.name.toLowerCase().split('.').pop();return x==='txt'?'&#128221;':x==='wav'?'&#127925;':(x==='ttf'||x==='otf')?'&#128288;':'&#128196;'}
+// An image without a thumbnail (copied onto the card elsewhere, or uploaded
+// before thumbnails were made for every folder): fetch it once, make one in
+// the browser and store it on the sign. One at a time; never while uploading.
+const thumbQueue=[];let thumbBusy=false;
+function noThumb(img){if(img.dataset.tried){img.replaceWith(document.createTextNode('\u{1F4F7}'));return}
+  img.dataset.tried='1';thumbQueue.push(img);pumpThumbs()}
+async function pumpThumbs(){if(thumbBusy)return;thumbBusy=true;
+  while(thumbQueue.length){const img=thumbQueue.shift();if(!img.isConnected)continue;
+    while($('#up').disabled)await new Promise(r=>setTimeout(r,1000));
+    const path=decodeURIComponent(img.dataset.path),dir=path.includes('/')?path.slice(0,path.lastIndexOf('/')):'',name=path.split('/').pop();
+    let ok=false;
+    try{const r=await fetch('/library/download?path='+encodeURIComponent(path));
+      if(r.ok){const t=await makeThumb(await r.blob());
+        if(t){const res=await putInPieces(dir,name,t,null,true);ok=res.ok}}}catch(e){}
+    if(ok)img.src='/library/thumb?path='+encodeURIComponent(path)+'&v='+Date.now();
+    else img.replaceWith(document.createTextNode('\u{1F4F7}'))}
+  thumbBusy=false}
 function inPhotos(p){p=p==null?cwd:p;return p==='photos'||p.startsWith('photos/')}
 function render(d){cwd=d.path||'';$('#crumbs').innerHTML=crumbs(cwd);$('#shrinkrow').hidden=!inPhotos();
   const sp=$('#space');sp.textContent=d.total_bytes?size(d.free_bytes)+' free':'';sp.className='space'+(d.low_space?' low':'');
@@ -78,7 +95,7 @@ function render(d){cwd=d.path||'';$('#crumbs').innerHTML=crumbs(cwd);$('#shrinkr
   let h='<div class="grid">';
   d.entries.forEach(e=>{const p=q(e.path);h+='<div class="item">';
     if(e.type==='dir')h+='<div class="thumb" onclick="go(\''+p+'\')">'+icon(e)+'</div>';
-    else if(e.is_image)h+='<div class="thumb" onclick="window.open(\'/library/download?path='+encodeURIComponent(e.path)+'\')"><img loading="lazy" src="/library/thumb?path='+encodeURIComponent(e.path)+'" onerror="this.replaceWith(document.createTextNode(\'\u{1F4F7}\'))"></div>';
+    else if(e.is_image)h+='<div class="thumb" onclick="window.open(\'/library/download?path='+encodeURIComponent(e.path)+'\')"><img loading="lazy" src="/library/thumb?path='+encodeURIComponent(e.path)+'" data-path="'+encodeURIComponent(e.path)+'" onerror="noThumb(this)"></div>';
     else h+='<div class="thumb" onclick="window.open(\'/library/download?path='+encodeURIComponent(e.path)+'\')">'+icon(e)+'</div>';
     h+='<div class="nm">'+esc(e.name)+(e.size!=null?'<br><span class="dim">'+size(e.size)+'</span>':'')+'</div>';
     h+='<div class="acts"><button onclick="rn(\''+p+'\',\''+q(e.name)+'\')">Rename</button><button class="del" onclick="rm(\''+p+'\',\''+(e.type==='dir'?'folder':'file')+'\')">Delete</button></div></div>'});
@@ -101,19 +118,22 @@ function readFile(f){return new Promise((res,rej)=>{const fr=new FileReader();fr
 // picture still covers 1280x720, and send a baseline JPEG plus a 240x135
 // thumbnail. The Tab5's decoders only take baseline JPEG and PNG, and a
 // 12 MP original would take a minute to send over its Wi-Fi.
+function loadImage(blob){const url=URL.createObjectURL(blob);
+  return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url}).finally(()=>URL.revokeObjectURL(url))}
+function thumbOf(img){   // 240x135, cropped to fill, like the list's tiles
+  const t=document.createElement('canvas');t.width=240;t.height=135;const tc=t.getContext('2d');
+  const kt=Math.max(240/img.naturalWidth,135/img.naturalHeight);tc.imageSmoothingQuality='high';
+  tc.drawImage(img,(240-img.naturalWidth*kt)/2,(135-img.naturalHeight*kt)/2,img.naturalWidth*kt,img.naturalHeight*kt);
+  return new Promise(r=>t.toBlob(r,'image/jpeg',0.8))}
+async function makeThumb(blob){try{return await thumbOf(await loadImage(blob))}catch(e){return null}}
 async function shrinkPhoto(f){
-  const url=URL.createObjectURL(f);
-  try{const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=rej;i.src=url});
+  try{const img=await loadImage(f);
     const k=Math.min(1,Math.max(1280/img.naturalWidth,720/img.naturalHeight));
     const cv=document.createElement('canvas');cv.width=Math.round(img.naturalWidth*k);cv.height=Math.round(img.naturalHeight*k);
     const ctx=cv.getContext('2d');ctx.imageSmoothingQuality='high';ctx.drawImage(img,0,0,cv.width,cv.height);
     const main=await new Promise(r=>cv.toBlob(r,'image/jpeg',0.88));
-    const t=document.createElement('canvas');t.width=240;t.height=135;const tc=t.getContext('2d');
-    const kt=Math.max(240/img.naturalWidth,135/img.naturalHeight);tc.imageSmoothingQuality='high';
-    tc.drawImage(img,(240-img.naturalWidth*kt)/2,(135-img.naturalHeight*kt)/2,img.naturalWidth*kt,img.naturalHeight*kt);
-    const thumb=await new Promise(r=>t.toBlob(r,'image/jpeg',0.8));
-    return {main,thumb,name:f.name.replace(/\.[^.]+$/,'')+'.jpg'}}
-  catch(e){return null}finally{URL.revokeObjectURL(url)}}
+    return {main,thumb:await thumbOf(img),name:f.name.replace(/\.[^.]+$/,'')+'.jpg'}}
+  catch(e){return null}}
 // Sends a file to the sign in 16 KB pieces (/library/upload_part). The
 // Tab5's Wi-Fi chip wedges on large inbound bursts; a request never bursts
 // more than its own body. Each piece is retried; onProgress(0..1).
@@ -156,7 +176,7 @@ async function uploadFiles(items){
       const isImg=/^image\//.test(f.type)||/\.(jpe?g|png|heic|heif|webp|gif)$/i.test(f.name);
       if(inPhotos(dir)&&$('#shrink').checked&&isImg){txt.textContent='Shrinking '+f.name+'...';const sp=await shrinkPhoto(f);
         if(sp){up={name:sp.name,type:'image/jpeg'};buf=await sp.main.arrayBuffer();thumb=sp.thumb}}
-      if(!buf)buf=await readFile(f);
+      if(!buf){buf=await readFile(f);if(isImg)thumb=await makeThumb(f)}   // any folder gets a thumbnail
       txt.textContent='Uploading '+(i+1)+' of '+items.length+': '+up.name;
       res=await sendOne(up,buf,fr=>bar.style.width=((base+fr/items.length)*100)+'%',false,dir);   // pieces retry themselves
       if(res.ok&&thumb&&res.data.saved&&res.data.saved[0]){   // its thumbnail, under the name it was saved as

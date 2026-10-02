@@ -385,8 +385,10 @@ void drawPanel() {
   };
   JsonObject w = st["wifi"];
   const bool wifi_ok = std::string(w["state"] | "") == "connected";
-  line("WI-FI", wifi_ok ? std::string(w["ssid"] | "") + "  " + std::to_string((int)(w["rssi"] | 0)) + " dBm"
-                        : std::string(w["state"] | "off"), wifi_ok ? good : warn);
+  const int rssi = w["rssi"] | 0;
+  const uint16_t bad = 0xF9A6;   // a weak signal is the usual reason uploads fail, so say so in colour
+  line("WI-FI", wifi_ok ? std::string(w["ssid"] | "") + "  " + std::to_string(rssi) + " dBm" + (rssi < -85 ? "  (weak)" : "")
+                        : std::string(w["state"] | "off"), !wifi_ok ? warn : rssi < -85 ? bad : rssi < -75 ? warn : good);
   const bool mq = st["mqtt"]["connected"] | false;
   line("HOME ASSISTANT", mq ? "connected" : std::string(st["mqtt"]["state"] | "off"), mq ? good : dim);
   line("CLOCK", std::string(st["content"]["clock"] | "") + ", " + std::string(st["content"]["timezone"] | ""),

@@ -45,7 +45,7 @@ The web page has a tab for each part:
 - **Status:** what is showing and why, volume, Wi-Fi, SD card, Home Assistant, firmware update,
   backup and restore, and recent activity.
 - **Display:** rows and columns, cell size and spacing, font, colour theme, flip speed, and
-  pictures beside the board. A live preview shows the layout before you save.
+  pictures beside the board (kept in `messages/side-pictures/`; slideshow photos go in `photos/`). A live preview shows the layout before you save.
 - **Messages:** what to show (message files, clock, weather, fixed text, photos), in what order and
   for how long. Messages can also be sent to show now, for a while or until cleared.
 - **Photos:** the slideshow: all photos, a folder or a selection; random or by name or date;

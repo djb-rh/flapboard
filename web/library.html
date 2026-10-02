@@ -162,7 +162,12 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 // instead of failing the batch.
 // items: [{file, dir}] -- dir is the folder it goes into (a dropped folder
 // keeps its structure under the current one).
-async function uploadFiles(items){
+// Drops and picks made while an upload runs join the queue.
+let pendingUploads=[],uploading=false;
+async function uploadFiles(items){pendingUploads.push(...items);if(uploading)return;uploading=true;
+  while(pendingUploads.length)await runUploads(pendingUploads.splice(0));
+  uploading=false}
+async function runUploads(items){
   if(!items.length)return;
   const prog=$('#prog'),bar=$('#progbar'),txt=$('#progtxt');prog.style.display=txt.style.display='block';bar.style.width='0';$('#up').disabled=true;
   let saved=0,skipped=[],failed=[];const made=new Set();
@@ -189,7 +194,7 @@ async function uploadFiles(items){
   const parts=[];if(saved)parts.push(saved+' file'+(saved===1?'':'s')+' uploaded.');
   if(skipped.length)parts.push('Skipped '+skipped.length+' (names starting with a dot are not allowed).');
   if(failed.length)parts.push('Failed: '+failed.join(', ')+'.');
-  note(failed.length?'err':'ok',parts.join(' ')||'Nothing to upload.');go(cwd)}
+  note(failed.length?'err':'ok',parts.join(' ')||'Nothing to upload.');if(!pendingUploads.length)go(cwd)}
 $('#picker').onchange=function(){const files=[...this.files];this.value='';uploadFiles(files.map(file=>({file,dir:cwd})))};
 
 // Drag and drop anywhere on the page. Folders are walked (webkitGetAsEntry,
@@ -201,12 +206,11 @@ function walk(entry,dir,out){return new Promise(resolve=>{
     const more=()=>r.readEntries(async es=>{if(es.length){all.push(...es);more()}else{for(const e of all)await walk(e,sub,out);resolve()}},()=>resolve());more()}
   else resolve()})}
 let dragDepth=0;
-const canDrop=e=>e.dataTransfer&&[...e.dataTransfer.types].includes('Files')&&!$('#up').disabled;
+const canDrop=e=>e.dataTransfer&&[...e.dataTransfer.types].includes('Files');
 document.addEventListener('dragenter',e=>{if(!canDrop(e))return;e.preventDefault();if(++dragDepth===1)document.body.classList.add('dragging')});
 document.addEventListener('dragover',e=>{if(!canDrop(e))return;e.preventDefault();e.dataTransfer.dropEffect='copy'});
 document.addEventListener('dragleave',e=>{if(dragDepth&&--dragDepth===0)document.body.classList.remove('dragging')});
 document.addEventListener('drop',async e=>{if(!e.dataTransfer)return;e.preventDefault();dragDepth=0;document.body.classList.remove('dragging');
-  if($('#up').disabled)return;
   const entries=[...e.dataTransfer.items].filter(i=>i.kind==='file').map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry());
   const out=[];
   if(entries.length&&entries.every(Boolean)){for(const en of entries)await walk(en,cwd,out)}

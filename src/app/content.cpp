@@ -78,7 +78,10 @@ void seedLibrary() {
   DIR *d = opendir(dir.c_str());
   if (!d) return;
   bool any = false;
-  while (dirent *e = readdir(d)) any |= e->d_name[0] != '.';
+  while (dirent *e = readdir(d)) {   // message files only: side-pictures/ lives here too
+    const size_t n = strlen(e->d_name);
+    any |= e->d_name[0] != '.' && n > 4 && strcasecmp(e->d_name + n - 4, ".txt") == 0;
+  }
   closedir(d);
   if (any) return;
   FILE *f = fopen((dir + "/welcome.txt").c_str(), "wb");

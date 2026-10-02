@@ -44,7 +44,14 @@ namespace {
 void makeLibraryFolders() {
   const std::string root = std::string(sdcard::mountPoint()) + "/flapboard";
   mkdir(root.c_str(), 0777);
-  for (const char *d : {"photos", "messages", "images", "sounds", "fonts"})
+  // "images" was the side pictures' folder until 0.9.0; easily taken for the
+  // photos' one, so they moved in with the messages they frame. Move an old one over.
+  mkdir((root + "/messages").c_str(), 0777);
+  struct stat st;
+  if (stat((root + "/images").c_str(), &st) == 0 && stat((root + "/messages/side-pictures").c_str(), &st) != 0 &&
+      rename((root + "/images").c_str(), (root + "/messages/side-pictures").c_str()) == 0)
+    note("sd: moved images/ to messages/side-pictures/");
+  for (const char *d : {"photos", "messages", "messages/side-pictures", "sounds", "fonts"})
     mkdir((root + "/" + d).c_str(), 0777);
   library::setRoot(root);
   library::setSpaceProvider(sdcard::space);
@@ -104,6 +111,19 @@ void setup() {
   formatCardIfAsked();
   if (sdcard::begin()) makeLibraryFolders();
   else note("sd: not mounted (%s): the file library is unavailable", sdcard::problem());
+  {
+    // Side pictures chosen before the rename point into images/: follow it.
+    JsonDocument patch;
+    {
+      config::Reader r;
+      for (const char *k : {"side_left", "side_right"}) {
+        const std::string v = r.doc()[k] | "";
+        if (v.rfind("images/", 0) == 0) patch[k] = "messages/side-pictures/" + v.substr(7);
+      }
+    }
+    std::string err;
+    if (patch.size()) config::apply(patch.as<JsonVariantConst>(), &err);
+  }
 
   mem("before sound");
   clock::begin();

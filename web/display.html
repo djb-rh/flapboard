@@ -46,7 +46,7 @@ textarea{width:100%;min-height:70px;font:15px ui-monospace,Menlo,monospace;paddi
 <div><label>Letters</label><div class="inline"><input type="color" id="c_glyph"><label class="chk"><input type="checkbox" id="u_glyph"> custom</label></div></div>
 </div><p class="hint">More fonts: upload a .ttf into the <a href="/library">fonts folder</a>. Letters only; the colour tiles keep their colours.</p></section>
 
-<section class="card"><h2>Side images</h2><div class="grid2">
+<section class="card"><h2>Side pictures</h2><div class="grid2">
 <div><label for="side_left">Left</label><select id="side_left"></select><button class="sec" id="up_left" style="margin-top:6px">Upload...</button></div>
 <div><label for="side_right">Right</label><select id="side_right"></select><button class="sec" id="up_right" style="margin-top:6px">Upload...</button></div>
 <div><label for="side_width">Width (% of screen, each)</label><input id="side_width" type="number" min="5" max="40"></div>
@@ -148,7 +148,7 @@ async function loadFonts(){const r=await (await fetch('/api/fonts')).json();cons
   for(const f of r.fonts){sel.add(new Option(f.name.replace(/-Regular$/,'')+(f.source==='card'?' (SD card)':''),f.name));
     try{const ff=new FontFace(f.name,`url(/fonts/${encodeURIComponent(f.name)}.ttf)`);document.fonts.add(await ff.load())}catch(e){}}}
 async function loadImages(){const sels=[$('#side_left'),$('#side_right')];
-  let list=[];try{const d=await (await fetch('/library/list?path=images')).json();list=d.entries.filter(e=>e.is_image)}catch(e){}
+  let list=[];try{const d=await (await fetch('/library/list?path=messages/side-pictures')).json();list=d.entries.filter(e=>e.is_image)}catch(e){}
   for(const s of sels){s.innerHTML='<option value="">None</option>';for(const e of list)s.add(new Option(e.name,e.path))}}
 let side='left';
 $('#up_left').onclick=()=>{side='left';$('#picker').click()};$('#up_right').onclick=()=>{side='right';$('#picker').click()};
@@ -175,7 +175,7 @@ $('#picker').onchange=async function(){const f=this.files[0];if(!f)return;this.v
   const w=img.naturalWidth*k,h=img.naturalHeight*k;ctx.imageSmoothingQuality='high';ctx.drawImage(img,(slot.w-w)/2,(slot.h-h)/2,w,h);
   const blob=await new Promise(r=>cv.toBlob(r,'image/png'));
   const name=side+'-'+f.name.replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9 _-]/g,'').slice(0,40)+'.png';
-  const res=await putInPieces('images',name,blob);const d=res.data||{};
+  const res=await putInPieces('messages/side-pictures',name,blob);const d=res.data||{};
   if(!res.ok){note('err',d.error||'Upload failed');return}
   await loadImages();const p=d.saved[0];const sel=$('#side_'+side);sel.value=p;fillForm(Object.assign(readForm(),{['side_'+side]:p}));onChange();
   note('ok','Uploaded '+p+' at '+slot.w+' x '+slot.h+' px. Save to put it on the sign.')};

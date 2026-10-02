@@ -59,7 +59,7 @@ async function refresh(){
     const w=s.wifi;
     const wifi=w.state==='connected'?'<span class="good">connected</span> to '+esc(w.ssid)+' ('+w.rssi+' dBm)':'<span class="warn">'+esc(w.state)+'</span> '+esc(w.ssid);
     const rows=[['Wi-Fi',wifi],['Address',w.ip?esc(w.ip)+' &middot; '+esc(s.hostname):'-'],
-      ['SD card',s.sd.mounted?size(s.sd.free_bytes)+' free of '+size(s.sd.total_bytes)+' ('+esc(s.sd.bus)+')':'<span class="bad">'+({none:'no card',exfat:'exFAT, cannot read',ntfs:'NTFS, cannot read',unformatted:'not formatted'}[s.sd.problem]||'cannot read')+'</span>'+(s.sd.problem==='none'?'':' (<a href="/library">format it</a>)')],
+      ['SD card',s.sd.mounted?size(s.sd.total_bytes-s.sd.free_bytes)+' used, '+size(s.sd.free_bytes)+' free of '+size(s.sd.total_bytes)+' ('+esc(s.sd.bus)+')':'<span class="bad">'+({none:'no card',exfat:'exFAT, cannot read',ntfs:'NTFS, cannot read',unformatted:'not formatted'}[s.sd.problem]||'cannot read')+'</span>'+(s.sd.problem==='none'?'':' (<a href="/library">format it</a>)')],
       ['Clock (RTC)',esc(s.rtc)],['Battery',s.battery.mv+' mV, '+s.battery.percent+'%'+(s.battery.ma>50?' (charging)':'')],
       ['Memory','internal '+size(s.memory.internal_free)+', largest DMA '+size(s.memory.dma_largest)+', PSRAM '+size(s.memory.psram_free)],
       ['Link watchdog',w.pings_ok+' pings ok, '+w.pings_lost+' lost, '+w.watchdog_restarts+' restarts'],

@@ -100,12 +100,27 @@ std::vector<Net> scanAll(bool allow_dups);
 void connect(const std::string &ssid, const std::string &pass, const uint8_t *bssid, int channel);
 
 void roam() {
-  if (g_state != State::Connected || g_portal) return;
-  if (!g_roam_check) g_roam_check = millis() + 60000;   // first look a minute after joining
+  // The signal is read every 15 s; two weak readings in a row (< -75 dBm)
+  // start a scan for a clearly stronger access point on the same network.
+  // A scan stalls things for a couple of seconds, so after one that found
+  // nothing better the next waits 2 minutes. (It was every 10 minutes: a
+  // sign moved behind something sat at -90 dBm, its link silent, until then.)
+  static int weak = 0;
+  static uint32_t scan_ok_at = 0;
+  if (g_state != State::Connected || g_portal) {
+    weak = 0;
+    return;
+  }
+  if (!g_roam_check) g_roam_check = millis() + 30000;   // first look 30 s after joining
   if ((int32_t)(millis() - g_roam_check) < 0) return;
-  g_roam_check = millis() + 10 * 60000;
+  g_roam_check = millis() + 15000;
   const int now = (int)WiFi.RSSI();
-  if (now >= -75 || millis() - g_busy_ms < 30000) return;
+  if (now >= -75) {
+    weak = 0;
+    return;
+  }
+  if (++weak < 2 || (int32_t)(millis() - scan_ok_at) < 0 || millis() - g_busy_ms < 30000) return;
+  scan_ok_at = millis() + 120000;
   const uint8_t *cur = WiFi.BSSID();
   uint8_t mine[6] = {0};
   if (cur) memcpy(mine, cur, 6);
@@ -120,6 +135,7 @@ void roam() {
     connect(g_ssid, config::secrets::wifiPass(), n.bssid, n.channel);
     return;
   }
+  note("wifi: weak signal (%d dBm) and no clearly stronger access point heard", now);
 }
 
 void watchLink() {

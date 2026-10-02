@@ -461,7 +461,10 @@ bool runPanel(SignState &st) {
       close = true;   // so the board can show it
     } else {
       for (int i = 0; i < 4; i++)
-        if (kModes[i].hit(x, y)) post(ActionKind::Source, i);
+        if (kModes[i].hit(x, y)) {
+          post(ActionKind::Source, i);
+          close = true;   // a new show: let it be seen
+        }
     }
     if (!close) drawControlsState();
     else g_panel_until = 0;
@@ -1012,6 +1015,7 @@ void renderTask(void *) {
       if (mode == Mode::Board) {
         g_ph.shown.clear();
         redrawAll(st);
+        if (g_panel_open) drawPanel();   // the switch came from elsewhere (web, MQTT, schedule): keep the sheet whole
       }
     }
     if (mode == Mode::Photo && !g_panel_open && !g_panel_req) {

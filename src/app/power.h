@@ -24,7 +24,7 @@ bool isOn();
 bool blankedForUpdate();
 void wake();                    // a tap while dark
 void requestLatch(bool off);    // any task: true = "off" (held), false = release ("on")
-void testRelay(int seconds);    // any task: relay on for a moment, to check the wiring
+void testRelay(int flips);   // flip the relay the other way and back, a second each, this many times
 std::string statusJson();
 
 }  // namespace power

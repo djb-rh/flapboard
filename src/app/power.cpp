@@ -30,7 +30,8 @@ const int kAllowed[] = {53, 54, 2, 3, 4, 16, 17, 18, 45, 47, 48, 51, 52};
 bool g_on = true;
 bool g_latch = false;
 volatile int g_latch_req = -1;      // -1 none, 0 release, 1 off
-volatile uint32_t g_relay_test_until = 0;
+volatile uint32_t g_relay_test_until = 0;   // test running until then (started kTestMs before)
+constexpr uint32_t kFlipMs = 1000;
 uint32_t g_wake_until = 0;
 int g_pin = -1;
 bool g_active_high = true;
@@ -193,9 +194,16 @@ void loop() {
     g_reason = p.reason;
     g_brightness = brightness;
   }
+  // The test flips the relay to the opposite of what it should be and back,
+  // a second each way, so the change shows whether the lights are on or off
+  // now (forcing it on showed nothing while the screen was on anyway).
   const bool testing = g_relay_test_until && (int32_t)(millis() - g_relay_test_until) < 0;
   if (!testing) g_relay_test_until = 0;
-  const bool relay = g_on || testing;
+  bool relay = g_on;
+  if (testing) {
+    const uint32_t left = g_relay_test_until - millis();
+    if ((left / kFlipMs) % 2 == 1) relay = !g_on;   // odd seconds left: the other way
+  }
   if (g_pin >= 0 && relay != g_relay) driveRelay(relay);
   std::string st = buildStatus();
   xSemaphoreTake(g_status_mux, portMAX_DELAY);
@@ -218,7 +226,7 @@ void wake() {
 }
 
 void requestLatch(bool off) { g_latch_req = off ? 1 : 0; }
-void testRelay(int seconds) { g_relay_test_until = millis() + (uint32_t)seconds * 1000; }
+void testRelay(int flips) { g_relay_test_until = millis() + (uint32_t)(2 * flips) * kFlipMs; }   // flips: there-and-back pairs
 
 SemaphoreHandle_t g_status_mux = xSemaphoreCreateMutex();
 std::string g_status_json = "{}";

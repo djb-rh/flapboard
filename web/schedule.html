@@ -52,7 +52,7 @@ button.mini{padding:5px 9px;font-size:13px}
 <option value="17">G17: M5-Bus</option><option value="18">G18: M5-Bus</option><option value="45">G45: M5-Bus</option><option value="47">G47: M5-Bus</option>
 <option value="48">G48: M5-Bus</option><option value="51">G51: M5-Bus</option><option value="52">G52: M5-Bus</option></select></div>
 <div><label for="relay_active_high">Relay switches on when the pin is</label><select id="relay_active_high"><option value="1">High (most modules)</option><option value="0">Low</option></select></div>
-</div><div class="row"><button class="sec" id="test">Test the relay (3 s)</button><span class="dim" id="relaystate"></span></div>
+</div><div class="row"><button class="sec" id="test">Test the relay</button><span class="dim" id="relaystate"></span></div>
 <p class="hint">The relay follows the display: on together, off together. Use an opto-isolated relay module (or M5Stack's Relay unit on Port A), never a bare relay coil on the pin; if the car's lights run on mains power, the relay and its wiring must be rated and enclosed for it.</p></section>
 
 <div class="savebar"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
@@ -108,7 +108,7 @@ $('#addsleep').onclick=()=>{collect();data.sleep.push({name:'Overnight',days:[],
 $('#save').onclick=async()=>{const b=body();const r=await post('/api/config',b);if(!r.ok){note('err',r.d.error);return}saved=JSON.stringify(b);dirty();note('ok','Saved.');setTimeout(status,1500)};
 $('#off').onclick=async()=>{await post('/api/power',{state:'off'});note('ok','Turned off. It stays off until you turn it on.');setTimeout(status,800)};
 $('#on').onclick=async()=>{await post('/api/power',{state:'on'});note('ok','Turned on (sleep hours still apply).');setTimeout(status,800)};
-$('#test').onclick=async()=>{await post('/api/power',{relay_test:3});note('ok','Relay on for 3 seconds.');setTimeout(status,500)};
+$('#test').onclick=async()=>{await post('/api/power',{relay_test:3});note('ok','Flipping the relay off and on three times (6 seconds), then back to normal.');setTimeout(status,500)};
 // "Check the camera": a snapshot every second with the changed cells over it.
 let camTimer=null;
 async function camFrame(){try{

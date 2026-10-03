@@ -310,7 +310,7 @@ esp_err_t handleWeather(httpd_req_t *req) {
 }
 
 // {"state": "off"} holds the sign (and the car's lights) off until
-// {"state": "on"}; {"relay_test": 3} switches the relay on for 3 s.
+// {"state": "on"}; {"relay_test": 3} flips the relay the other way and back 3 times.
 esp_err_t handlePower(httpd_req_t *req) {
   if (req->method == HTTP_POST) {
     std::string body;
@@ -320,7 +320,7 @@ esp_err_t handlePower(httpd_req_t *req) {
     const std::string st = d["state"] | "";
     if (st == "off") power::requestLatch(true);
     else if (st == "on") power::requestLatch(false);
-    if (d["relay_test"].is<int>()) power::testRelay(std::min(30, std::max(1, d["relay_test"].as<int>())));
+    if (d["relay_test"].is<int>()) power::testRelay(std::min(10, std::max(1, d["relay_test"].as<int>())));
   }
   return sendJson(req, 200, power::statusJson());
 }

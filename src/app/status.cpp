@@ -123,6 +123,7 @@ std::string json() {
   d["sound"] = sd2;
   d["sound"]["volume"] = sound::volume();
   d["sound"]["enabled"] = sound::enabled();
+  d["sound"]["paused_for_upload"] = sound::pausedForUpload();
   JsonDocument ct, wx;
   deserializeJson(ct, content::statusJson());
   deserializeJson(wx, weather::statusJson());

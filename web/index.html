@@ -9,7 +9,8 @@
 <section class="card"><h2>Sound</h2>
 <div class="vol"><button id="mute" class="sec" aria-pressed="false">Mute</button>
 <input type="range" id="vol" min="0" max="100" step="5" aria-label="Volume"><output id="volOut" class="dim"></output></div>
-<p class="dim" style="margin:8px 0 0;font-size:13px">On the sign: press and hold anywhere for volume, mute and its address.</p></section>
+<p class="dim" style="margin:8px 0 0;font-size:13px">On the sign: press and hold anywhere for volume, mute and its address.</p>
+<p id="sndpause" class="dim" style="margin:6px 0 0;font-size:13px" hidden>Paused while an upload is arriving; it comes back when the upload ends.</p></section>
 <section class="card"><h2>Status</h2><dl id="st"><dt>Loading</dt><dd>...</dd></dl></section>
 <section class="card"><h2>This sign</h2>
 <label for="dn">Name (also its network name: <span id="host" class="dim"></span>)</label>
@@ -41,7 +42,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
-function size(n){const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]}
+function size(n){const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1000&&i<u.length-1){n/=1000;i++}return (i?n.toFixed(1):n)+' '+u[i]}
 function up(s){const h=Math.floor(s/3600),m=Math.floor(s/60)%60;return (h?h+' h ':'')+m+' min'}
 let edited=false;$('#dn').oninput=()=>edited=true;
 let volBusy=0,soundOn=true;
@@ -56,6 +57,7 @@ async function refresh(){
     $('#name').textContent=s.device_name;document.title=s.device_name;
     if(!edited)$('#dn').value=s.device_name;$('#host').textContent=s.hostname;
     if(Date.now()-volBusy>3000){$('#vol').value=s.sound.volume;showVol(s.sound.volume,s.sound.enabled)}
+    $('#sndpause').hidden=!s.sound.paused_for_upload;
     const w=s.wifi;
     const wifi=w.state==='connected'?'<span class="good">connected</span> to '+esc(w.ssid)+' ('+w.rssi+' dBm)':'<span class="warn">'+esc(w.state)+'</span> '+esc(w.ssid);
     const rows=[['Wi-Fi',wifi],['Address',w.ip?esc(w.ip)+' &middot; '+esc(s.hostname):'-'],

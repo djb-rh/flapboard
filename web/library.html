@@ -44,7 +44,7 @@ let cwd='';
 const $=s=>document.querySelector(s);
 const esc=s=>{const d=document.createElement('div');d.textContent=s;return d.innerHTML};
 const q=s=>String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-function size(n){if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1024&&i<u.length-1){n/=1024;i++}return (i?n.toFixed(1):n)+' '+u[i]}
+function size(n){if(n==null)return'';const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1000&&i<u.length-1){n/=1000;i++}return (i?n.toFixed(1):n)+' '+u[i]}
 function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
 function crumbs(path){let out='<a onclick="go(\'\')">SD card</a>',acc='';
   (path?path.split('/'):[]).forEach(p=>{acc=acc?acc+'/'+p:p;out+=' / <a onclick="go(\''+q(acc)+'\')">'+esc(p)+'</a>'});return out}

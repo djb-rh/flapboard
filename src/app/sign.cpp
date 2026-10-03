@@ -289,21 +289,25 @@ void drawButton(const Button &b, const char *label, uint16_t bg, uint16_t fg, co
 }
 
 // Just the bar between a level's - and + buttons (what a tap changes).
-void drawLevelBar(int value, bool on, const Button &down, const Button &up) {
+// paused: sound is on but held silent while an upload arrives -- the bar
+// goes grey and says so, rather than looking like the speaker has died.
+void drawLevelBar(int value, bool on, const Button &down, const Button &up, bool paused = false) {
   auto &d = M5.Display;
-  const uint16_t ink = 0xF79E, accent = 0xEC20;
+  const uint16_t ink = 0xF79E, accent = 0xEC20, grey = 0x6B4D;
   const int bx = down.x + down.w + 18, bw = up.x - 18 - bx, by = down.y + 20, bh = down.h - 40;
   d.fillRoundRect(bx, by, bw, bh, 12, 0x18E3);
-  if (on && value > 0) d.fillRoundRect(bx, by, std::max(24, bw * value / 100), bh, 12, accent);
-  d.setFont(&lgfx::fonts::FreeSansBold18pt7b);
+  if (on && value > 0) d.fillRoundRect(bx, by, std::max(24, bw * value / 100), bh, 12, paused ? grey : accent);
+  d.setFont(paused ? &lgfx::fonts::FreeSansBold12pt7b : &lgfx::fonts::FreeSansBold18pt7b);
   d.setTextDatum(middle_center);
   d.setTextColor(ink);
-  char t[16];
-  snprintf(t, sizeof(t), on ? "%d%%" : "MUTED", value);
+  char t[32];
+  if (!on) snprintf(t, sizeof(t), "MUTED");
+  else if (paused) snprintf(t, sizeof(t), "PAUSED: UPLOADING");
+  else snprintf(t, sizeof(t), "%d%%", value);
   d.drawString(t, bx + bw / 2, by + bh / 2);
 }
 
-void drawLevel(const char *label, int value, bool on, const Button &down, const Button &up) {
+void drawLevel(const char *label, int value, bool on, const Button &down, const Button &up, bool paused = false) {
   auto &d = M5.Display;
   const uint16_t panel = 0x2124, ink = 0xF79E, dim = 0xA534, btn = 0x39C7;
   d.setFont(&lgfx::fonts::FreeSans12pt7b);
@@ -312,14 +316,14 @@ void drawLevel(const char *label, int value, bool on, const Button &down, const 
   d.drawString(label, down.x, down.y - 8);
   drawButton(down, "-", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
   drawButton(up, "+", btn, ink, &lgfx::fonts::FreeSansBold24pt7b);
-  drawLevelBar(value, on, down, up);
+  drawLevelBar(value, on, down, up, paused);
 }
 
 // After a tap: repaint only the controls whose state can have changed, not
 // the whole sheet (repainting it all made the sheet flash on every press).
 struct ShownControls {
   int vol = -1, bri = -1;
-  int on = -1;
+  int on = -1, paused = -1;
   std::string source;
 } g_shown_ctl;
 
@@ -335,7 +339,8 @@ void drawControlsState() {
   const int vol = sound::volume(), on = sound::enabled() ? 1 : 0;
   auto &c = g_shown_ctl;
   M5.Display.startWrite();
-  if (vol != c.vol || on != c.on) drawLevelBar(vol, on, kVolDown, kVolUp);
+  const int paused = sound::pausedForUpload() ? 1 : 0;
+  if (vol != c.vol || on != c.on || paused != c.paused) drawLevelBar(vol, on, kVolDown, kVolUp, paused);
   if (bri != c.bri) drawLevelBar(bri, true, kBriDown, kBriUp);
   if (source != c.source)
     for (int i = 0; i < 4; i++)
@@ -343,7 +348,7 @@ void drawControlsState() {
         drawButton(kModes[i], kModeLabels[i], source == kModeSources[i] ? accent : btn, ink, &lgfx::fonts::FreeSans12pt7b);
   if (on != c.on) drawButton(kMute, on ? "Mute" : "Unmute", on ? btn : accent, ink, &lgfx::fonts::FreeSans12pt7b);
   M5.Display.endWrite();
-  c = {vol, bri, on, source};
+  c = {vol, bri, on, paused, source};
 }
 
 void drawPanel() {
@@ -407,7 +412,7 @@ void drawPanel() {
            (unsigned long)(up / 3600), (unsigned long)(up / 60 % 60));
   line("FIRMWARE", b, dim);
   // The controls.
-  drawLevel("VOLUME", sound::volume(), sound::enabled(), kVolDown, kVolUp);
+  drawLevel("VOLUME", sound::volume(), sound::enabled(), kVolDown, kVolUp, sound::pausedForUpload());
   int bri;
   std::string source;
   {
@@ -427,7 +432,7 @@ void drawPanel() {
   drawButton(kShowIp, "Show IP", btn, ink, &lgfx::fonts::FreeSans12pt7b);
   drawButton(kClose, "Close", btn, ink, &lgfx::fonts::FreeSansBold12pt7b);
   d.endWrite();
-  g_shown_ctl = {sound::volume(), bri, sound::enabled() ? 1 : 0, source};
+  g_shown_ctl = {sound::volume(), bri, sound::enabled() ? 1 : 0, sound::pausedForUpload() ? 1 : 0, source};
 }
 
 // Returns true while the panel is up (the board is not drawn meanwhile).
@@ -472,6 +477,13 @@ bool runPanel(SignState &st) {
   if (g_redraw_at && (int32_t)(millis() - g_redraw_at) >= 0) {
     g_redraw_at = 0;
     drawControlsState();   // the main loop has applied the change by now
+  }
+  // Things that change without a tap (an upload starting or ending pauses
+  // the sound): look twice a second; only what changed is repainted.
+  static uint32_t last_look = 0;
+  if (millis() - last_look > 500) {
+    last_look = millis();
+    drawControlsState();
   }
   if ((int32_t)(millis() - g_panel_until) >= 0) {
     g_panel_open = false;

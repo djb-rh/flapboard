@@ -26,7 +26,8 @@ void setSuppressed(bool quiet);
 // Sound is about to be needed (a board change is starting): start the
 // speaker now so the first clacks are not lost. Any task.
 void wake();   // the display is off: no clacks (without touching the saved setting)
-bool enabled();               // pick up /flapboard/sounds/clack_*.wav again
+bool enabled();
+bool pausedForUpload();     // on, but held silent while an upload arrives               // pick up /flapboard/sounds/clack_*.wav again
 std::string statsJson();
 // Records the next `seconds` of mixer output to path (a WAV), for checking
 // timing without ears. Returns at once; a note says when it is written.

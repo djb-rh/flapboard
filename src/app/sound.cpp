@@ -270,6 +270,16 @@ void loop() {
   // and never run it during an upload (net::busy: the link wedges otherwise).
   const bool uploading = net::uploading();
   const bool want = g_enabled && !g_suppressed && !uploading && millis() - g_wanted_ms < 2000;
+  // Say so, once per upload: silence with no reason given looks like the
+  // speaker has died (as it sometimes does on other Tab5 firmware).
+  static bool told_paused = false;
+  if (uploading && g_enabled && !told_paused) {
+    told_paused = true;
+    note("sound: paused while an upload is arriving (the Wi-Fi link wedges otherwise)");
+  } else if (!uploading && told_paused) {
+    told_paused = false;
+    note("sound: back on");
+  }
   if (want && !g_spk_on) {
     xSemaphoreTake(g_spk_mux, portMAX_DELAY);
     M5.Speaker.begin();
@@ -316,6 +326,8 @@ void setEnabled(bool on) {
 
 int volume() { return g_volume; }
 void setSuppressed(bool quiet) { g_suppressed = quiet; }
+bool pausedForUpload() { return g_enabled && net::uploading(); }
+
 bool enabled() { return g_enabled; }
 
 void capture(const std::string &path, float seconds) {

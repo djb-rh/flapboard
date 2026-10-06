@@ -27,7 +27,7 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 <input id="msg_prefix" placeholder="{time}"><div class="sample" id="s_prefix"></div>
 <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="msg_suffix_on" style="width:auto"> After each message</label>
 <input id="msg_suffix" placeholder="{date}"><div class="sample" id="s_suffix"></div>
-<p class="hint">Fields work here, like in messages: {time} {date} {temp} {cond} {place} and the rest; | starts a new row. These lines share the board with the message: keep your message paragraphs short enough to leave room for them, or the bottom lines of a long message won't show.</p></div>
+<p class="hint">Fields work here, like in messages: {time} {date} {temp} {cond} {place} and the rest; | starts a new row. The lines before go on the top rows and the lines after on the bottom rows, with the message centred between. They share the board with the message: keep your message paragraphs short enough to leave room for them, or the bottom lines of a long message won't show.</p></div>
 <div id="textbox"><label for="content_text">Fixed message</label><textarea id="content_text" rows="3"></textarea></div>
 <label id="borderrow" style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="border" style="width:auto"> <span id="borderlbl">Argyle border down each side</span></label>
 <div class="row"><button id="saveprog">Save</button></div>

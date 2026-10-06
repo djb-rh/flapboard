@@ -9,6 +9,8 @@
 #include <freertos/semphr.h>
 
 #include <flapcore/template.h>
+#include <ff.h>
+#include <esp_task_wdt.h>
 
 #include <algorithm>
 #include <cstring>
@@ -31,6 +33,8 @@ std::vector<Message> g_lib;
 bool g_lib_dirty = true;
 uint32_t g_lib_loaded = 0;
 std::string g_source, g_key;   // program settings in use (a change restarts the program)
+bool g_border_messages = false, g_border_clock = false, g_border_weather = false;
+bool g_border = false;         // the running program's
 Message g_cur;                 // the message being shown
 bool g_have = false;
 int g_index = -1;              // position in the library (sequential order)
@@ -147,6 +151,7 @@ bool lookup(const std::string &name, const std::string &arg, std::string *out) {
 // are global settings.
 struct Program {
   std::string source = "messages", order = "random", text, clock_tpl, weather_tpl;
+  bool border = false;         // argyle border down each side (per source: messages, clock, weather)
   bool rb_mode = false;        // RB Mode: on Fridays the clock adds friday_text
   std::string friday_text;
   std::vector<std::string> files;
@@ -201,6 +206,9 @@ Program readProgram() {
     }
     p.clock_tpl = d["clock_template"] | "{time}|{date}";
     p.rb_mode = d["clock_rb_mode"] | false;
+    g_border_messages = d["border_messages"] | false;
+    g_border_clock = d["border_clock"] | false;
+    g_border_weather = d["border_weather"] | false;
     p.friday_text = d["clock_friday_text"] | "";
     p.weather_tpl = d["weather_template"] | "{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}";
     enabled = d["schedule_enabled"] | false;
@@ -223,12 +231,46 @@ Program readProgram() {
   p.text = c.program.text;
   p.files = c.program.files;
   p.dwell = std::max(3, c.program.dwell);
+  p.border = p.source == "clock" ? g_border_clock : p.source == "weather" ? g_border_weather : g_border_messages;
   return p;
+}
+
+// FatFs's own directory walk: each entry comes with its date, so the scan is
+// one pass per folder. (A POSIX stat per file made FatFs search the folder
+// from the top every time: with 417 photos in one folder, switching to
+// photos took over 15 s and the watchdog restarted the sign.) Paths under
+// the mount point map to drive 0; anything else falls back to readdir.
+bool fatList(const std::string &abs, std::vector<photos::DirEntry> *out) {
+  const std::string mp = sdcard::mountPoint();
+  if (abs.rfind(mp, 0) != 0) return false;
+  const std::string path = "0:" + abs.substr(mp.size());
+  FF_DIR dir;
+  FILINFO fi;
+  if (f_opendir(&dir, path.c_str()) != FR_OK) return false;
+  int n = 0;
+  while (f_readdir(&dir, &fi) == FR_OK && fi.fname[0]) {
+    if (fi.fname[0] == '.') continue;
+    photos::DirEntry e;
+    e.name = fi.fname;
+    e.dir = (fi.fattrib & AM_DIR) != 0;
+    struct tm t = {};
+    t.tm_year = ((fi.fdate >> 9) & 0x7F) + 80;
+    t.tm_mon = ((fi.fdate >> 5) & 0x0F) - 1;
+    t.tm_mday = fi.fdate & 0x1F;
+    t.tm_hour = (fi.ftime >> 11) & 0x1F;
+    t.tm_min = (fi.ftime >> 5) & 0x3F;
+    t.tm_sec = (fi.ftime & 0x1F) * 2;
+    e.mtime = mktime(&t);
+    out->push_back(e);
+    if (++n % 200 == 0) esp_task_wdt_reset();   // a big folder on a slow card
+  }
+  f_closedir(&dir);
+  return true;
 }
 
 std::string programKey(const Program &p) {
   std::string k = p.source + "|" + p.order + "|" + std::to_string(p.dwell) + "|" + p.text + "|" + p.clock_tpl + "|" + (p.rb_mode ? "rb:" + p.friday_text : "") + "|" +
-                  p.weather_tpl + "|";
+                  p.weather_tpl + "|" + (p.border ? "border|" : "|");
   for (auto &f : p.files) k += f + ",";
   return k;
 }
@@ -253,7 +295,7 @@ void push(bool force) {
   const std::string text = expand(g_cur.text);
   if (!force && text == g_shown) return;
   g_shown = text;
-  sign::show(text, g_cur.align, !g_cur.top);
+  sign::show(text, g_cur.align, !g_cur.top, g_border);
 }
 
 }  // namespace
@@ -277,7 +319,7 @@ void showOverride(const std::string &text, int seconds) {
   g_override_until = seconds > 0 ? millis() + (uint32_t)seconds * 1000 : 0;
   g_shown.clear();
   if (sign::photoMode()) sign::photoCaption(expand(text));
-  else sign::show(expand(text), 1, true);
+  else sign::show(expand(text), 1, true, g_border_messages);
   publishStatus();
 }
 
@@ -297,9 +339,12 @@ void clearOverride() {
 
 void loopInner();
 void loop() {
-  static uint32_t last = 0;
-  if (millis() - last < 1000) return;
+  static uint32_t last = 0, gen = 0;
+  // once a second, or straight away after a settings change (a new program
+  // shouldn't wait up to a second to start)
+  if (millis() - last < 1000 && config::generation() == gen) return;
   last = millis();
+  gen = config::generation();
   loopInner();
   publishStatus();
 }
@@ -310,6 +355,7 @@ void loopInner() {
   if (key != g_key) {   // new program: start it now
     g_key = key;
     g_source = p.source;
+    g_border = p.border;
     g_lib_dirty = true;
     g_have = false;
     g_index = -1;
@@ -331,7 +377,7 @@ void loopInner() {
       if (t != g_shown) {
         g_shown = t;
         if (sign::photoMode()) sign::photoCaption(t);   // over the photo, not instead of it
-        else sign::show(t, 1, true);
+        else sign::show(t, 1, true, g_border_messages);   // a sent message looks like the library's
       }
       if (!sign::photoMode()) return;   // in photo mode the slideshow carries on underneath
     }
@@ -344,7 +390,9 @@ void loopInner() {
     // slideshow carries on 3 s after the last piece.
     if (g_have && net::uploading()) return;
     if (g_photos_dirty || millis() - g_photos_loaded > 300000) {
-      g_photos = sdcard::mounted() ? photos::scan(std::string(sdcard::mountPoint()) + "/flapboard") : std::vector<photos::Photo>();
+      const uint32_t t0 = millis();
+      g_photos = sdcard::mounted() ? photos::scan(std::string(sdcard::mountPoint()) + "/flapboard", "photos", fatList) : std::vector<photos::Photo>();
+      note("photos: %u found in %lu ms", (unsigned)g_photos.size(), (unsigned long)(millis() - t0));
       g_photos_dirty = false;
       g_photos_loaded = millis();
     }

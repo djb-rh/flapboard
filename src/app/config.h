@@ -32,6 +32,9 @@ bool apply(JsonVariantConst patch, std::string *error);
 // For restoring a backup: applies the keys this firmware knows, skips the
 // rest (a backup from an older or newer version), returns how many applied.
 int applyKnown(JsonVariantConst patch);
+// Goes up by one with every saved change: lets loops react at once rather
+// than on their next timed look.
+uint32_t generation();
 
 // Convenience getters.
 std::string deviceName();

@@ -16,22 +16,29 @@ std::string lower(std::string s) {
   return s;
 }
 
-void walk(const std::string &abs, const std::string &rel, std::vector<Photo> *out, int depth) {
-  if (depth > 8) return;
+bool posixList(const std::string &abs, std::vector<DirEntry> *out) {
   DIR *d = opendir(abs.c_str());
-  if (!d) return;
+  if (!d) return false;
   std::vector<std::string> names;
-  while (dirent *e = readdir(d)) {   // readdir, not File::openNextFile (Tabulous5: it opens every entry)
-    if (e->d_name[0] == '.') continue;
-    names.push_back(e->d_name);
-  }
+  while (dirent *e = readdir(d)) names.push_back(e->d_name);   // readdir, not File::openNextFile (Tabulous5: it opens every entry)
   closedir(d);
   for (auto &n : names) {
-    const std::string a = abs + "/" + n, r = rel + "/" + n;
+    if (n[0] == '.') continue;
     struct stat st;
-    if (stat(a.c_str(), &st) != 0) continue;
-    if (S_ISDIR(st.st_mode)) walk(a, r, out, depth + 1);
-    else if (isPhotoName(n)) out->push_back({r, (int64_t)st.st_mtime});
+    if (stat((abs + "/" + n).c_str(), &st) != 0) continue;
+    out->push_back({n, S_ISDIR(st.st_mode), (int64_t)st.st_mtime});
+  }
+  return true;
+}
+
+void walk(const std::string &abs, const std::string &rel, std::vector<Photo> *out, int depth, const Lister &list) {
+  if (depth > 8) return;
+  std::vector<DirEntry> es;
+  if (!(list ? list(abs, &es) : posixList(abs, &es))) return;
+  for (auto &e : es) {
+    if (e.name.empty() || e.name[0] == '.') continue;
+    if (e.dir) walk(abs + "/" + e.name, rel + "/" + e.name, out, depth + 1, list);
+    else if (isPhotoName(e.name)) out->push_back({rel + "/" + e.name, e.mtime});
   }
 }
 
@@ -44,9 +51,9 @@ bool isPhotoName(const std::string &name) {
   return ext == ".jpg" || ext == ".jpeg" || ext == ".png";
 }
 
-std::vector<Photo> scan(const std::string &abs_root, const std::string &rel) {
+std::vector<Photo> scan(const std::string &abs_root, const std::string &rel, const Lister &list) {
   std::vector<Photo> out;
-  walk(abs_root + "/" + rel, rel, &out, 0);
+  walk(abs_root + "/" + rel, rel, &out, 0, list);
   std::sort(out.begin(), out.end(), [](const Photo &a, const Photo &b) { return lower(a.path) < lower(b.path); });
   return out;
 }

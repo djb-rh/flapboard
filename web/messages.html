@@ -22,6 +22,7 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 </div>
 <div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div></div>
 <div id="textbox"><label for="content_text">Fixed message</label><textarea id="content_text" rows="3"></textarea></div>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="border_messages" style="width:auto"> Argyle border down each side (messages, the fixed message and messages sent from here; uses two columns each side)</label>
 <div class="row"><button id="saveprog">Save</button></div>
 <p class="hint">The clock and weather layouts are on the <a href="/clock">Clock &amp; weather</a> page. Phase 6 adds a schedule on top of this.</p></section>
 
@@ -73,11 +74,11 @@ let delArmed=false;$('#delf').onclick=async()=>{if(!cur)return;if(!delArmed){del
   delArmed=false;$('#delf').textContent='Delete file';const r=await post('/library/delete',{path:'messages/'+cur});if(!r.ok){note('err',r.d.error);return}note('ok','Deleted '+cur+'.');cur='';await listFiles();openFile(files[0]||'')};
 $('#content_source').onchange=srcUi;
 $('#saveprog').onclick=async()=>{const body={content_source:$('#content_source').value,content_order:$('#content_order').value,content_dwell:+$('#content_dwell').value,
-  content_text:$('#content_text').value,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
+  content_text:$('#content_text').value,border_messages:$('#border_messages').checked,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
   const r=await post('/api/config',body);if(!r.ok){note('err',r.d.error);return}cfg=r.d;note('ok','Saved. The sign switches over within a second.')};
 $('#send').onclick=async()=>{const r=await post('/api/message',{text:$('#quick').value,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)};
 $('#back').onclick=async()=>{await post('/api/message',{clear:true});note('ok','Back to the program.')};
-(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text'].forEach(k=>$('#'+k).value=cfg[k]);srcUi();
+(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text'].forEach(k=>$('#'+k).value=cfg[k]);$('#border_messages').checked=!!cfg.border_messages;srcUi();
   await listFiles();await openFile(files[0]||'');refreshNow();setInterval(refreshNow,3000);
   fetch('/api/status').then(r=>r.json()).then(s=>$('#name').textContent=s.device_name)})();
 </script></body></html>

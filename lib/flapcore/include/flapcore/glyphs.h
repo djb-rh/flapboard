@@ -48,8 +48,10 @@ class GlyphSet {
   // column_major: store each face transposed (column after column), for
   // Surfaces whose memory runs down the logical columns -- a portrait panel
   // shown in landscape, like the Tab5's.
+  // gap: the space between cells, so picture flaps that span cells (the
+  // argyle block) line up across it.
   bool build(const Drum &drum, const Theme &theme, FontRaster &font, int cell_w, int cell_h, float cap_frac = 0.62f,
-             bool column_major = false);
+             bool column_major = false, int gap = 0);
   void clear();
 
   int cellW() const { return w_; }

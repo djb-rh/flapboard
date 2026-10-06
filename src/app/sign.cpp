@@ -1093,7 +1093,8 @@ void rebuild(SignState &st, const Settings &s) {
   }
   st.theme = Theme::custom(s.theme, s.c_bg, s.c_flap, s.c_glyph);
   loadFont(st.font, s.font);
-  st.glyphs.build(st.drum, st.theme, st.font, st.lay.cell_w, st.lay.cell_h, s.cap, /*column_major=*/true);
+  st.glyphs.build(st.drum, st.theme, st.font, st.lay.cell_w, st.lay.cell_h, s.cap, /*column_major=*/true,
+                  /*gap=*/st.lay.pitch_x - st.lay.cell_w);   // argyle flaps line up across the gaps
   st.glyph_bytes = st.glyphs.bytes();
   st.ren.setup(st.lay, &st.glyphs, st.theme);
   st.board.resize(s.rows, s.cols, (int)st.drum.size());
@@ -1263,13 +1264,14 @@ void begin() {
                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 }
 
-void show(const std::string &text, int align, bool vertical_center) {
+void show(const std::string &text, int align, bool vertical_center, bool argyle) {
   sound::wake();   // start the speaker before the first flap lands
   xSemaphoreTake(g_mux, portMAX_DELAY);
   g_pending = text;
   g_pending_opt = MessageOptions();
   g_pending_opt.align = align == 0 ? Align::Left : align == 2 ? Align::Right : Align::Center;
   g_pending_opt.vertical_center = vertical_center;
+  g_pending_opt.argyle_border = argyle;
   g_has_pending = true;
   xSemaphoreGive(g_mux);
 }

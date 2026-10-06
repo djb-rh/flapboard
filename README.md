@@ -35,7 +35,7 @@ Windows only refuses to *format* large cards as FAT32. The sign makes its folder
 The sign opens a Wi-Fi hotspot called **FlapBoard-XXXX**. Join it from a phone; the setup page
 opens by itself. Pick your network and type its password. After that the sign is at
 `http://flapboard.local/`, or at the address shown when you **press and hold anywhere on the
-screen**. The info sheet that opens also has the brightness and volume controls, a QR code for the
+screen** (a single tap does it too). The info sheet that opens also has the brightness and volume controls, a QR code for the
 web page, and buttons to switch between messages, clock, weather and photos.
 
 ## Using it
@@ -61,7 +61,12 @@ The web page has a tab for each part:
 
 Files in `messages/` hold one message per paragraph (separate them with a blank line). Each line
 is a row on the board. Text is upper-cased; letters, digits and `!@#$()-+&=;:'"%,./?°` are on the
-drum, plus colour tiles written `{R}` `{O}` `{Y}` `{G}` `{B}` `{V}` `{W}` `{K}`.
+drum, plus colour tiles written `{R}` `{O}` `{Y}` `{G}` `{B}` `{V}` `{W}` `{K}`, and the four
+quarters of a UNC argyle block, `{a}{b}` over `{c}{d}`.
+
+**Argyle border:** messages, the clock and the weather each have a setting (Messages page, Clock &
+weather page) that runs stacked argyle blocks down both sides of the board, two columns each,
+with the text in between.
 
 ```
 # A comment

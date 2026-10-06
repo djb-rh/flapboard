@@ -179,7 +179,7 @@ void handleTouch() {
   }
   if (sign::panelOpen()) {
     if (t.wasClicked() || t.wasHold()) sign::panelTap(t.x, t.y);
-  } else if (t.wasHold()) {
+  } else if (t.wasClicked() || t.wasHold()) {   // one tap (or a hold, as before) opens the sheet
     sign::openPanel();
   }
 }

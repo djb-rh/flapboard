@@ -56,7 +56,23 @@ Drum Drum::fromString(const std::string &chars, const std::string &tiles) {
 Drum Drum::vestaboard() {
   // Vestaboard's character codes 0-62 in order (its unused codes skipped),
   // then codes 63-70, the colour tiles.
-  return fromString(" ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$()-+&=;:'\"%,./?°", "ROYGBVWK");
+  Drum d = fromString(" ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$()-+&=;:'\"%,./?°", "ROYGBVWK");
+  // Last, so a letter never has to turn past them.
+  for (int q = 1; q <= 4; q++) {
+    DrumEntry e;
+    e.tile = true;
+    e.code = kArgyleCodes[q - 1];
+    e.art = (uint8_t)q;
+    e.rgb565 = rgb(0xF4, 0xF4, 0xF0);
+    d.entries_.push_back(e);
+  }
+  return d;
+}
+
+int Drum::argyle(int quarter) const {
+  for (size_t i = 0; i < entries_.size(); i++)
+    if (entries_[i].art == quarter) return (int)i;
+  return -1;
 }
 
 int Drum::indexOfChar(uint32_t cp) const {

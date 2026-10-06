@@ -26,7 +26,7 @@ static std::string row(const std::vector<uint16_t> &g, int r, int cols) {
 }
 
 void test_drum_order() {
-  TEST_ASSERT_EQUAL(65, (int)kDrum.size());   // 57 characters + 8 tiles
+  TEST_ASSERT_EQUAL(69, (int)kDrum.size());   // 57 characters + 8 tiles + 4 argyle quarters
   TEST_ASSERT_EQUAL(0, kDrum.indexOfChar(' '));
   TEST_ASSERT_EQUAL(1, kDrum.indexOfChar('A'));
   TEST_ASSERT_EQUAL(27, kDrum.indexOfChar('1'));
@@ -36,7 +36,24 @@ void test_drum_order() {
   TEST_ASSERT_EQUAL(64, kDrum.indexOfTile('K'));
   TEST_ASSERT_EQUAL(-1, kDrum.indexOfChar('a'));
   TEST_ASSERT_FALSE(kDrum.hasLowercase());
-  TEST_ASSERT_EQUAL(64, kDrum.stepsBetween(1, 0));   // A back to blank: all the way round
+  TEST_ASSERT_EQUAL(68, kDrum.stepsBetween(1, 0));   // A back to blank: all the way round
+  for (int q = 1; q <= 4; q++) TEST_ASSERT_EQUAL(64 + q, kDrum.argyle(q));   // argyle quarters last
+  TEST_ASSERT_EQUAL(65, kDrum.indexOfTile('a'));
+}
+
+void test_message_argyle_border() {
+  MessageOptions o;
+  o.argyle_border = true;
+  const auto g = layoutMessage(kDrum, "HI", 4, 8, o);   // 4 columns of border, 4 for text
+  const int a = kDrum.argyle(1), b = kDrum.argyle(2), c = kDrum.argyle(3), d = kDrum.argyle(4);
+  for (int r = 0; r < 4; r++) {   // blocks stack: top quarters on even rows, bottom on odd
+    const int L = r % 2 == 0 ? a : c, R = r % 2 == 0 ? b : d;
+    TEST_ASSERT_EQUAL(L, g[r * 8 + 0]); TEST_ASSERT_EQUAL(R, g[r * 8 + 1]);
+    TEST_ASSERT_EQUAL(L, g[r * 8 + 6]); TEST_ASSERT_EQUAL(R, g[r * 8 + 7]);
+  }
+  // "HI" centred in the 4 text columns of the middle row block
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('H'), g[1 * 8 + 3]);
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('I'), g[1 * 8 + 4]);
 }
 
 void test_message_center_wrap_tiles() {
@@ -106,11 +123,11 @@ void test_board_wraps_forward_and_full_spin() {
   m.start = StartMode::Together;
   b.setMotion(m);
   b.jump({1});                 // showing A
-  b.show({0}, 0);              // to blank: 64 flaps forward, never backwards
-  TEST_ASSERT_EQUAL_UINT32(640, b.finishMs());
+  b.show({0}, 0);              // to blank: 68 flaps forward, never backwards
+  TEST_ASSERT_EQUAL_UINT32(680, b.finishMs());
   b.jump({5});
   b.show({5}, 0, true);        // full spin: once round
-  TEST_ASSERT_EQUAL_UINT32(650, b.finishMs());
+  TEST_ASSERT_EQUAL_UINT32(690, b.finishMs());
 }
 
 void test_board_speed_variance_is_per_module_and_bounded() {
@@ -403,6 +420,7 @@ int main() {
   UNITY_BEGIN();
   RUN_TEST(test_drum_order);
   RUN_TEST(test_message_center_wrap_tiles);
+  RUN_TEST(test_message_argyle_border);
   RUN_TEST(test_message_left_keeps_spacing_and_unknowns_blank);
   RUN_TEST(test_board_forward_only_constant_speed);
   RUN_TEST(test_board_wraps_forward_and_full_spin);

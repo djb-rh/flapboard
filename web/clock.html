@@ -32,7 +32,9 @@
 <label for="clock_template">Clock message</label><input id="clock_template"><div class="sample" id="s_clock"></div>
 <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px"><input type="checkbox" id="clock_rb_mode" style="width:auto"> RB Mode: on Fridays, the clock adds this message</label>
 <input id="clock_friday_text" maxlength="120"><div class="sample" id="s_friday"></div>
-<label for="weather_template">Weather message</label><input id="weather_template"><div class="sample" id="s_weather"></div>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px"><input type="checkbox" id="border_clock" style="width:auto"> Argyle border down each side of the clock</label>
+<label for="weather_template">Weather message</label><input id="weather_template">
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:8px"><input type="checkbox" id="border_weather" style="width:auto"> Argyle border down each side of the weather</label><div class="sample" id="s_weather"></div>
 <p class="hint">| starts a new row. Fields: {time} {date} {temp} {feels} {hi} {lo} {hum} {wind} {cond} {place} {units} {wind_units}. A field can carry its own format: {time:%H:%M}. To show one of these, choose it on the <a href="/messages">Messages</a> page, or use the fields inside any message.</p></section>
 
 <div class="row" style="position:sticky;bottom:0;background:var(--bg);padding:10px 0"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
@@ -41,7 +43,7 @@
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
-const KEYS=['timezone','ntp_server','time_format','date_format','weather_place','weather_lat','weather_lon','units','weather_minutes','clock_template','clock_rb_mode','clock_friday_text','weather_template'];
+const KEYS=['timezone','ntp_server','time_format','date_format','weather_place','weather_lat','weather_lon','units','weather_minutes','clock_template','clock_rb_mode','clock_friday_text','border_clock','weather_template','border_weather'];
 const NUMS=['weather_lat','weather_lon','weather_minutes'];
 let saved={};
 function form(){const c={};KEYS.forEach(k=>{const el=$('#'+k);c[k]=el.type==='checkbox'?el.checked:NUMS.includes(k)?+el.value:el.value});return c}

@@ -67,6 +67,23 @@ std::vector<Line> wrap(const Line &l, int cols) {
 
 std::vector<uint16_t> layoutMessage(const Drum &drum, const std::string &text, int rows, int cols,
                                     const MessageOptions &opt) {
+  if (opt.argyle_border && cols > 4 && drum.argyle(1) >= 0) {
+    MessageOptions inner = opt;
+    inner.argyle_border = false;
+    const int ic = cols - 4;
+    const std::vector<uint16_t> body = layoutMessage(drum, text, rows, ic, inner);
+    std::vector<uint16_t> grid((size_t)rows * cols, 0);
+    for (int r = 0; r < rows; r++) {
+      const int q = (r % 2 == 0) ? 1 : 3;   // a block is two rows: top quarters, then bottom
+      const uint16_t left = (uint16_t)drum.argyle(q), right = (uint16_t)drum.argyle(q + 1);
+      grid[(size_t)r * cols + 0] = left;
+      grid[(size_t)r * cols + 1] = right;
+      grid[(size_t)r * cols + cols - 2] = left;
+      grid[(size_t)r * cols + cols - 1] = right;
+      for (int c = 0; c < ic; c++) grid[(size_t)r * cols + 2 + c] = body[(size_t)r * ic + c];
+    }
+    return grid;
+  }
   const bool upper = !opt.keep_case && !drum.hasLowercase();
   std::vector<Line> lines;
   std::string cur;

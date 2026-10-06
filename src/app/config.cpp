@@ -26,7 +26,7 @@ constexpr const char *kDefaults = R"JSON({
   "sound_enabled": true,
   "sound_volume": 60,
   "sound_offset_ms": 0,
-  "board_rows": 6,
+  "board_rows": 8,
   "board_cols": 22,
   "flap_width": 0,
   "flap_aspect": 1.4,
@@ -55,7 +55,10 @@ constexpr const char *kDefaults = R"JSON({
   "clock_template": "{time}|{date}",
   "clock_rb_mode": false,
   "clock_friday_text": "HAPPY FRIDAY!",
-  "weather_template": "{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}",
+  "weather_template": "{time}|{place}|NOW {temp}\u00B0 {cond}|HI {hi}  LO {lo}",
+  "border_messages": false,
+  "border_clock": false,
+  "border_weather": false,
   "time_format": "%-I:%M %p",
   "date_format": "%a %b %-d",
   "timezone": "America/New_York",
@@ -173,6 +176,9 @@ std::string toJson() {
   return out;
 }
 
+volatile uint32_t g_generation = 0;
+uint32_t generation() { return g_generation; }
+
 bool apply(JsonVariantConst patch, std::string *error) {
   if (!patch.is<JsonObjectConst>()) {
     *error = "expected a JSON object";
@@ -195,6 +201,7 @@ bool apply(JsonVariantConst patch, std::string *error) {
     *error = "could not write the settings file";
     return false;
   }
+  g_generation++;
   return true;
 }
 
@@ -208,7 +215,10 @@ int applyKnown(JsonVariantConst patch) {
       g_doc[kv.key()] = kv.value();
       n++;
     }
-    if (n) save();
+    if (n) {
+      save();
+      g_generation++;
+    }
   }
   return n;
 }

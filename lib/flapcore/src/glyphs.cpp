@@ -48,8 +48,43 @@ void GlyphSet::clear() {
   w_ = h_ = 0;
 }
 
+// UNC argyle, one repeat in a 2x2 block of cells: a Carolina-blue diamond
+// tip to tip down the block's middle, navy dashes crossing through its centre
+// to the block's corners (so they run on into the next block), navy stripes
+// down the outer edges, white behind. Drawn per pixel, 3x3 supersampled, in
+// block coordinates that include the gap between cells.
+uint16_t argylePixel(int quarter, int x, int y, int cw, int ch, int gap) {
+  const float W = 2.0f * cw + gap, H = 2.0f * ch + gap;
+  const float ox = (quarter == 2 || quarter == 4) ? cw + gap : 0;
+  const float oy = (quarter >= 3) ? ch + gap : 0;
+  const float stripe = 0.045f * W;                 // navy edge stripes
+  const float cx = W / 2, hw = 0.43f * (W - 2 * stripe), hh = H / 2;   // diamond half-width / half-height
+  const float lw = std::max(1.2f, 0.022f * W);     // dash line width
+  const float dash = 0.07f * H;                    // dash period along the line
+  // the two dashed diagonals: (cx-hw, 0)-(cx+hw, H) and (cx+hw, 0)-(cx-hw, H)
+  const float len = std::sqrt((2 * hw) * (2 * hw) + H * H);
+  int r = 0, g = 0, b = 0;
+  for (int sy = 0; sy < 3; sy++)
+    for (int sx = 0; sx < 3; sx++) {
+      const float X = ox + x + (sx + 0.5f) / 3, Y = oy + y + (sy + 0.5f) / 3;
+      int cr = 0xF4, cg = 0xF4, cb = 0xF0;                                     // white
+      if (std::fabs(X - cx) / hw + std::fabs(Y - hh) / hh <= 1) cr = 0x7B, cg = 0xAF, cb = 0xD4;   // Carolina blue
+      for (int k = 0; k < 2; k++) {
+        const float x0 = k == 0 ? cx - hw : cx + hw, x1 = k == 0 ? cx + hw : cx - hw;
+        const float dx = x1 - x0, dy = H;
+        const float t = ((X - x0) * dx + Y * dy) / (len * len);              // 0..1 along the line
+        const float dist = std::fabs((X - x0) * dy - Y * dx) / len;
+        if (t >= 0 && t <= 1 && dist <= lw / 2 && std::fmod(t * len, dash) < dash * 0.55f) cr = 0x13, cg = 0x29, cb = 0x4B;
+      }
+      if (X < stripe || X > W - stripe) cr = 0x13, cg = 0x29, cb = 0x4B;     // navy edge stripes
+      r += cr, g += cg, b += cb;
+    }
+  r /= 9, g /= 9, b /= 9;
+  return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
 bool GlyphSet::build(const Drum &drum, const Theme &theme, FontRaster &font, int cw, int ch, float cap_frac,
-                     bool column_major) {
+                     bool column_major, int gap) {
   clear();
   column_major_ = column_major;
   if (cw < 4 || ch < 4) return false;
@@ -73,7 +108,10 @@ bool GlyphSet::build(const Drum &drum, const Theme &theme, FontRaster &font, int
     // The flap card: two shades, rounded corners on the board colour.
     for (int y = 0; y < ch; y++) {
       const uint16_t card = e.tile ? e.rgb565 : (y < half ? theme.flap_top : theme.flap_bottom);
-      for (int x = 0; x < cw; x++) px[y * cw + x] = blend(theme.background, card, cornerCoverage(x, y, cw, ch, radius));
+      for (int x = 0; x < cw; x++) {
+        const uint16_t c = e.art ? argylePixel(e.art, x, y, cw, ch, gap) : card;
+        px[y * cw + x] = blend(theme.background, c, cornerCoverage(x, y, cw, ch, radius));
+      }
     }
     if (e.tile || e.cp == ' ' || e.cp == 0) continue;
     if (!font.render(e.cp, &g) || g.w <= 0 || g.h <= 0) continue;

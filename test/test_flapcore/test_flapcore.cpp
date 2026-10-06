@@ -41,6 +41,31 @@ void test_drum_order() {
   TEST_ASSERT_EQUAL(65, kDrum.indexOfTile('a'));
 }
 
+void test_message_footer_on_bottom_rows() {
+  // 6 rows: "HI" centred in the 4 rows above a 2-row footer
+  std::string t = "HI";
+  t += kFooterMark;
+  t += "A|B";
+  const auto g = layoutMessage(kDrum, t, 6, 3, MessageOptions());
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('H'), g[1 * 3 + 0]);   // (4 - 1) / 2 = row 1
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('A'), g[4 * 3 + 1]);
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('B'), g[5 * 3 + 1]);
+  for (int r : {0, 2, 3}) for (int c = 0; c < 3; c++) TEST_ASSERT_EQUAL(0, g[r * 3 + c]);
+}
+
+void test_message_header_and_footer() {
+  // 7 rows: header row 0, footer row 6, "HI" centred in rows 1-5 (row 3)
+  std::string t = "T";
+  t += kHeaderMark;
+  t += "HI";
+  t += kFooterMark;
+  t += "B";
+  const auto g = layoutMessage(kDrum, t, 7, 3, MessageOptions());
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('T'), g[0 * 3 + 1]);
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('H'), g[3 * 3 + 0]);
+  TEST_ASSERT_EQUAL(kDrum.indexOfChar('B'), g[6 * 3 + 1]);
+}
+
 void test_message_argyle_border() {
   MessageOptions o;
   o.argyle_border = true;
@@ -421,6 +446,8 @@ int main() {
   RUN_TEST(test_drum_order);
   RUN_TEST(test_message_center_wrap_tiles);
   RUN_TEST(test_message_argyle_border);
+  RUN_TEST(test_message_footer_on_bottom_rows);
+  RUN_TEST(test_message_header_and_footer);
   RUN_TEST(test_message_left_keeps_spacing_and_unknowns_blank);
   RUN_TEST(test_board_forward_only_constant_speed);
   RUN_TEST(test_board_wraps_forward_and_full_spin);

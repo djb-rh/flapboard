@@ -25,6 +25,12 @@ struct MessageOptions {
   bool argyle_border = false;
 };
 
+// In the text, everything before kHeaderMark goes on the board's top rows (a
+// header) and everything after kFooterMark on its bottom rows (a footer);
+// the rest is laid out (centred, or from the top) in the rows between.
+constexpr char kHeaderMark = '\x1E';
+constexpr char kFooterMark = '\x1F';
+
 // rows*cols drum positions, row-major.
 std::vector<uint16_t> layoutMessage(const Drum &drum, const std::string &text, int rows, int cols,
                                     const MessageOptions &opt = MessageOptions());

@@ -8,6 +8,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 
+#include <flapcore/message.h>
 #include <flapcore/template.h>
 #include <ff.h>
 #include <esp_task_wdt.h>
@@ -443,8 +444,8 @@ void loopInner() {
       ok = pickNext(p);
       // the library's own lines, with the optional lines before and after
       // (their fields expand like the message's: {time}, {date}, ...)
-      if (ok && !p.prefix.empty()) g_cur.text = p.prefix + "|" + g_cur.text;
-      if (ok && !p.suffix.empty()) g_cur.text = g_cur.text + "|" + p.suffix;
+      if (ok && !p.prefix.empty()) g_cur.text = p.prefix + flapcore::kHeaderMark + g_cur.text;   // on the top rows
+      if (ok && !p.suffix.empty()) g_cur.text = g_cur.text + flapcore::kFooterMark + p.suffix;   // on the bottom rows
     }
     if (!ok) g_cur = Message{"", "{name}||ADD MESSAGES AT|{hostname}"};   // an empty library says how to fill it
     g_have = true;
@@ -460,15 +461,22 @@ void loopInner() {
 SemaphoreHandle_t g_status_mux = xSemaphoreCreateMutex();
 std::string g_status_json = "{}";
 
+// For people (web page, MQTT): the footer mark reads as a row break.
+std::string forDisplay(std::string s) {
+  for (auto &c : s)
+    if (c == flapcore::kFooterMark || c == flapcore::kHeaderMark) c = '|';
+  return s;
+}
+
 std::string buildStatus() {
   JsonDocument d;
   d["source"] = g_source;
   d["reason"] = g_reason;
   d["messages"] = (int)g_lib.size();
-  d["current"] = g_cur.text;
+  d["current"] = forDisplay(g_cur.text);
   d["file"] = g_cur.file;
   d["photos"] = (int)g_photos.size();
-  d["shown"] = g_shown;
+  d["shown"] = forDisplay(g_shown);
   d["override"] = g_override_on;
   d["override_text"] = g_override_on ? g_override : "";
   d["clock"] = clock::statusText();

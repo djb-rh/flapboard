@@ -85,39 +85,65 @@ std::vector<uint16_t> layoutMessage(const Drum &drum, const std::string &text, i
     return grid;
   }
   const bool upper = !opt.keep_case && !drum.hasLowercase();
-  std::vector<Line> lines;
-  std::string cur;
-  auto flush = [&]() {
-    Line l = tokenize(drum, cur, upper);
-    // Left keeps the spacing as typed (hand-aligned columns); centred and
-    // right-aligned lines are trimmed first.
-    if (opt.align != Align::Left) trim(l);
-    else while (!l.empty() && l.back() == 0) l.pop_back();
-    if (opt.wrap && (int)l.size() > cols) {
-      for (auto &w : wrap(l, cols)) lines.push_back(w);
-    } else {
-      if ((int)l.size() > cols) l.resize(cols);
-      lines.push_back(l);
+  // Text -> its rows (wrapped, trimmed or cut to the width).
+  auto linesOf = [&](const std::string &txt) {
+    std::vector<Line> lines;
+    std::string cur;
+    auto flush = [&]() {
+      Line l = tokenize(drum, cur, upper);
+      // Left keeps the spacing as typed (hand-aligned columns); centred and
+      // right-aligned lines are trimmed first.
+      if (opt.align != Align::Left) trim(l);
+      else while (!l.empty() && l.back() == 0) l.pop_back();
+      if (opt.wrap && (int)l.size() > cols) {
+        for (auto &w : wrap(l, cols)) lines.push_back(w);
+      } else {
+        if ((int)l.size() > cols) l.resize(cols);
+        lines.push_back(l);
+      }
+      cur.clear();
+    };
+    for (char c : txt) {
+      if (c == '\n' || c == '|') flush();
+      else if (c != '\r') cur += c;
     }
-    cur.clear();
+    flush();
+    // A trailing empty line from "text\n" is not a row.
+    while (lines.size() > 1 && lines.back().empty()) lines.pop_back();
+    return lines;
   };
-  for (char c : text) {
-    if (c == '\n' || c == '|') flush();
-    else if (c != '\r') cur += c;
+  // Header (before kHeaderMark) on the top rows, footer (after kFooterMark)
+  // on the bottom rows, the body in the rows between.
+  std::string body = text, head, foot;
+  const size_t hm = body.find(kHeaderMark);
+  if (hm != std::string::npos) {
+    head = body.substr(0, hm);
+    body = body.substr(hm + 1);
   }
-  flush();
-  // A trailing empty line from "text\n" is not a row.
-  while (lines.size() > 1 && lines.back().empty()) lines.pop_back();
-  if ((int)lines.size() > rows) lines.resize(rows);
+  const size_t fm = body.find(kFooterMark);
+  if (fm != std::string::npos) {
+    foot = body.substr(fm + 1);
+    body = body.substr(0, fm);
+  }
+  std::vector<Line> heads, lines = linesOf(body), feet;
+  if (hm != std::string::npos) heads = linesOf(head);
+  if (fm != std::string::npos) feet = linesOf(foot);
+  if ((int)heads.size() > rows) heads.resize(rows);
+  if ((int)feet.size() > rows - (int)heads.size()) feet.resize(rows - (int)heads.size());
+  const int body_top = (int)heads.size();
+  const int body_rows = rows - (int)heads.size() - (int)feet.size();
+  if ((int)lines.size() > body_rows) lines.resize(std::max(0, body_rows));
 
   std::vector<uint16_t> grid((size_t)rows * cols, 0);
-  const int top = opt.vertical_center ? (rows - (int)lines.size()) / 2 : 0;
-  for (size_t r = 0; r < lines.size(); r++) {
-    const Line &l = lines[r];
+  auto put = [&](const Line &l, int row) {
     const int pad = opt.align == Align::Left ? 0 : opt.align == Align::Right ? cols - (int)l.size()
                                                                               : (cols - (int)l.size()) / 2;
-    for (size_t c = 0; c < l.size(); c++) grid[(size_t)(top + r) * cols + pad + c] = l[c];
-  }
+    for (size_t c = 0; c < l.size(); c++) grid[(size_t)row * cols + pad + c] = l[c];
+  };
+  for (size_t r = 0; r < heads.size(); r++) put(heads[r], (int)r);
+  const int top = body_top + (opt.vertical_center ? (body_rows - (int)lines.size()) / 2 : 0);
+  for (size_t r = 0; r < lines.size(); r++) put(lines[r], top + (int)r);
+  for (size_t r = 0; r < feet.size(); r++) put(feet[r], body_top + body_rows + (int)r);
   return grid;
 }
 

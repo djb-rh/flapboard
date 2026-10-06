@@ -21,7 +21,9 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 <div><label for="content_dwell">Seconds per message</label><input id="content_dwell" type="number" min="3" max="3600"></div>
 </div>
 <div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div>
-<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px"><input type="checkbox" id="msg_prefix_on" style="width:auto"> Before each message</label>
+</div>
+<div id="affixbox" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)"><label>Extra lines for messages from the library</label>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:4px"><input type="checkbox" id="msg_prefix_on" style="width:auto"> Before each message</label>
 <input id="msg_prefix" placeholder="{time}"><div class="sample" id="s_prefix"></div>
 <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="msg_suffix_on" style="width:auto"> After each message</label>
 <input id="msg_suffix" placeholder="{date}"><div class="sample" id="s_suffix"></div>

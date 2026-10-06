@@ -152,6 +152,7 @@ bool lookup(const std::string &name, const std::string &arg, std::string *out) {
 struct Program {
   std::string source = "messages", order = "random", text, clock_tpl, weather_tpl;
   bool border = false;         // argyle border down each side (per source: messages, clock, weather)
+  std::string prefix, suffix;  // added before / after every library message (empty = off); fields allowed
   bool rb_mode = false;        // RB Mode: on Fridays the clock adds friday_text
   std::string friday_text;
   std::vector<std::string> files;
@@ -206,6 +207,8 @@ Program readProgram() {
     }
     p.clock_tpl = d["clock_template"] | "{time}|{date}";
     p.rb_mode = d["clock_rb_mode"] | false;
+    if (d["msg_prefix_on"] | false) p.prefix = d["msg_prefix"] | "";
+    if (d["msg_suffix_on"] | false) p.suffix = d["msg_suffix"] | "";
     g_border_messages = d["border_messages"] | false;
     g_border_clock = d["border_clock"] | false;
     g_border_weather = d["border_weather"] | false;
@@ -270,7 +273,7 @@ bool fatList(const std::string &abs, std::vector<photos::DirEntry> *out) {
 
 std::string programKey(const Program &p) {
   std::string k = p.source + "|" + p.order + "|" + std::to_string(p.dwell) + "|" + p.text + "|" + p.clock_tpl + "|" + (p.rb_mode ? "rb:" + p.friday_text : "") + "|" +
-                  p.weather_tpl + "|" + (p.border ? "border|" : "|");
+                  p.weather_tpl + "|" + (p.border ? "border|" : "|") + p.prefix + "|" + p.suffix + "|";
   for (auto &f : p.files) k += f + ",";
   return k;
 }
@@ -436,7 +439,13 @@ void loopInner() {
     }
     else if (p.source == "weather") g_cur = Message{"", p.weather_tpl};
     else if (p.source == "text") g_cur = Message{"", p.text};
-    else ok = pickNext(p);
+    else {
+      ok = pickNext(p);
+      // the library's own lines, with the optional lines before and after
+      // (their fields expand like the message's: {time}, {date}, ...)
+      if (ok && !p.prefix.empty()) g_cur.text = p.prefix + "|" + g_cur.text;
+      if (ok && !p.suffix.empty()) g_cur.text = g_cur.text + "|" + p.suffix;
+    }
     if (!ok) g_cur = Message{"", "{name}||ADD MESSAGES AT|{hostname}"};   // an empty library says how to fill it
     g_have = true;
     g_next_ms = millis() + (uint32_t)(g_cur.hold_s > 0 ? g_cur.hold_s : p.dwell) * 1000;

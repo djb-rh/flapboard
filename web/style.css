@@ -25,3 +25,5 @@ button:disabled{opacity:.5;cursor:default}
 .msg{padding:9px 12px;border-radius:8px;margin-bottom:12px;font-size:14px;border:1px solid var(--border)}
 .msg.ok{border-color:var(--good);color:var(--good)}.msg.err{border-color:var(--bad);color:var(--bad)}
 pre.log{margin:0;max-height:260px;overflow:auto;font:12px/1.45 ui-monospace,Menlo,monospace;color:var(--dim);white-space:pre-wrap}
+/* a field-expanded preview under a template box (Clock & weather, Messages) */
+.sample{font:14px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;background:var(--panel2);border-radius:8px;padding:8px 10px;margin:6px 0 0;min-height:1.5em}

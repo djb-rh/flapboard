@@ -20,7 +20,12 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 <div><label for="content_order">Order</label><select id="content_order"><option value="random">Random</option><option value="sequential">In file order</option></select></div>
 <div><label for="content_dwell">Seconds per message</label><input id="content_dwell" type="number" min="3" max="3600"></div>
 </div>
-<div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div></div>
+<div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px"><input type="checkbox" id="msg_prefix_on" style="width:auto"> Before each message</label>
+<input id="msg_prefix" placeholder="{time}"><div class="sample" id="s_prefix"></div>
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="msg_suffix_on" style="width:auto"> After each message</label>
+<input id="msg_suffix" placeholder="{date}"><div class="sample" id="s_suffix"></div>
+<p class="hint">Fields work here, like in messages: {time} {date} {temp} {cond} {place} and the rest; | starts a new row. These lines share the board with the message: keep your message paragraphs short enough to leave room for them, or the bottom lines of a long message won't show.</p></div>
 <div id="textbox"><label for="content_text">Fixed message</label><textarea id="content_text" rows="3"></textarea></div>
 <label id="borderrow" style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="border" style="width:auto"> <span id="borderlbl">Argyle border down each side</span></label>
 <div class="row"><button id="saveprog">Save</button></div>
@@ -65,6 +70,13 @@ function renderMsgs(){const ms=parseFile($('#editor').value);$('#fstate').textCo
 function borderKey(s){return s==='clock'?'border_clock':s==='weather'?'border_weather':'border_messages'}
 const BORDER_LBL={border_clock:'Argyle border down each side of the clock',border_weather:'Argyle border down each side of the weather',
   border_messages:'Argyle border down each side of messages (the library, the fixed message and messages sent from here)'};
+// What the before/after lines expand to right now, from the sign itself.
+let affixT=null;
+function affixSamples(){clearTimeout(affixT);affixT=setTimeout(async()=>{for(const k of ['prefix','suffix']){
+  const v=$('#msg_'+k).value,on=$('#msg_'+k+'_on').checked;let txt='';
+  if(on&&v){try{txt=(await (await fetch('/api/content?expand='+encodeURIComponent(v))).json()).text.split('|').join('\n')}catch(e){}}
+  $('#s_'+k).textContent=txt}},250)}
+['msg_prefix','msg_suffix','msg_prefix_on','msg_suffix_on'].forEach(id=>{$('#'+id).addEventListener('input',affixSamples);$('#'+id).addEventListener('change',affixSamples)});
 function srcUi(){const s=$('#content_source').value;$('#filesbox').hidden=s!=='messages';$('#textbox').hidden=s!=='text';$('#content_order').disabled=s!=='messages';
   const k=borderKey(s);$('#borderrow').hidden=s==='photos';$('#borderlbl').textContent=BORDER_LBL[k]+' (uses two columns each side)';$('#border').checked=!!cfg[k]}
 async function refreshNow(){try{const s=await (await fetch('/api/content')).json();$('#now').textContent=s.shown||'(blank)';
@@ -79,11 +91,13 @@ let delArmed=false;$('#delf').onclick=async()=>{if(!cur)return;if(!delArmed){del
   delArmed=false;$('#delf').textContent='Delete file';const r=await post('/library/delete',{path:'messages/'+cur});if(!r.ok){note('err',r.d.error);return}note('ok','Deleted '+cur+'.');cur='';await listFiles();openFile(files[0]||'')};
 $('#content_source').onchange=srcUi;
 $('#saveprog').onclick=async()=>{const body={content_source:$('#content_source').value,content_order:$('#content_order').value,content_dwell:+$('#content_dwell').value,
-  content_text:$('#content_text').value,[borderKey($('#content_source').value)]:$('#border').checked,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
+  content_text:$('#content_text').value,msg_prefix_on:$('#msg_prefix_on').checked,msg_prefix:$('#msg_prefix').value,
+  msg_suffix_on:$('#msg_suffix_on').checked,msg_suffix:$('#msg_suffix').value,[borderKey($('#content_source').value)]:$('#border').checked,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
   const r=await post('/api/config',body);if(!r.ok){note('err',r.d.error);return}cfg=r.d;note('ok','Saved. The sign switches over within a second.')};
 $('#send').onclick=async()=>{const r=await post('/api/message',{text:$('#quick').value,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)};
 $('#back').onclick=async()=>{await post('/api/message',{clear:true});note('ok','Back to the program.')};
-(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text'].forEach(k=>$('#'+k).value=cfg[k]);srcUi();
+(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text','msg_prefix','msg_suffix'].forEach(k=>$('#'+k).value=cfg[k]);
+  $('#msg_prefix_on').checked=!!cfg.msg_prefix_on;$('#msg_suffix_on').checked=!!cfg.msg_suffix_on;affixSamples();srcUi();
   await listFiles();await openFile(files[0]||'');refreshNow();setInterval(refreshNow,3000);
   fetch('/api/status').then(r=>r.json()).then(s=>$('#name').textContent=s.device_name)})();
 </script></body></html>

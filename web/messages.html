@@ -22,9 +22,9 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 </div>
 <div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div></div>
 <div id="textbox"><label for="content_text">Fixed message</label><textarea id="content_text" rows="3"></textarea></div>
-<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="border_messages" style="width:auto"> Argyle border down each side (messages, the fixed message and messages sent from here; uses two columns each side)</label>
+<label id="borderrow" style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="border" style="width:auto"> <span id="borderlbl">Argyle border down each side</span></label>
 <div class="row"><button id="saveprog">Save</button></div>
-<p class="hint">The clock and weather layouts are on the <a href="/clock">Clock &amp; weather</a> page. Phase 6 adds a schedule on top of this.</p></section>
+<p class="hint">The clock and weather layouts are on the <a href="/clock">Clock &amp; weather</a> page. The <a href="/schedule">Schedule</a> page can switch between these by day and time.</p></section>
 
 <section class="card"><h2>Show something now</h2>
 <textarea id="quick" rows="3" placeholder="LATE ARRIVAL|TRACK 4"></textarea>
@@ -61,7 +61,12 @@ async function openFile(f){cur=f;if(!f){$('#editor').value='';renderMsgs();retur
 function renderMsgs(){const ms=parseFile($('#editor').value);$('#fstate').textContent=($('#editor').value!==savedText?'Unsaved changes. ':'')+ms.length+' message'+(ms.length===1?'':'s');
   $('#msgs').innerHTML=ms.map((m,i)=>'<div class="m"><div style="flex:1;min-width:0"><pre>'+esc(m.text)+'</pre><small>'+m.align+(m.top?', top':'')+(m.hold?', '+m.hold+' s':'')+'</small></div><button class="sec" data-i="'+i+'">Show now</button></div>').join('');
   $('#msgs').querySelectorAll('button').forEach(b=>b.onclick=async()=>{const m=ms[+b.dataset.i];const r=await post('/api/message',{text:m.text,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)})}
-function srcUi(){const s=$('#content_source').value;$('#filesbox').hidden=s!=='messages';$('#textbox').hidden=s!=='text';$('#content_order').disabled=s!=='messages'}
+// The argyle border is set per program; this box follows whichever "Show" is chosen.
+function borderKey(s){return s==='clock'?'border_clock':s==='weather'?'border_weather':'border_messages'}
+const BORDER_LBL={border_clock:'Argyle border down each side of the clock',border_weather:'Argyle border down each side of the weather',
+  border_messages:'Argyle border down each side of messages (the library, the fixed message and messages sent from here)'};
+function srcUi(){const s=$('#content_source').value;$('#filesbox').hidden=s!=='messages';$('#textbox').hidden=s!=='text';$('#content_order').disabled=s!=='messages';
+  const k=borderKey(s);$('#borderrow').hidden=s==='photos';$('#borderlbl').textContent=BORDER_LBL[k]+' (uses two columns each side)';$('#border').checked=!!cfg[k]}
 async function refreshNow(){try{const s=await (await fetch('/api/content')).json();$('#now').textContent=s.shown||'(blank)';
   $('#nowinfo').textContent=(s.override?'A message sent from here or MQTT. ':'From the program: '+s.source+(s.file?' ('+s.file+')':'')+'. ')+s.messages+' messages in the library.'}catch(e){}}
 $('#file').onchange=()=>{if($('#editor').value!==savedText&&!window.__confirmLeave){note('err','Save or undo your changes to '+cur+' first (or press Open again).');window.__confirmLeave=true;$('#file').value=cur;return}window.__confirmLeave=false;openFile($('#file').value)};
@@ -74,11 +79,11 @@ let delArmed=false;$('#delf').onclick=async()=>{if(!cur)return;if(!delArmed){del
   delArmed=false;$('#delf').textContent='Delete file';const r=await post('/library/delete',{path:'messages/'+cur});if(!r.ok){note('err',r.d.error);return}note('ok','Deleted '+cur+'.');cur='';await listFiles();openFile(files[0]||'')};
 $('#content_source').onchange=srcUi;
 $('#saveprog').onclick=async()=>{const body={content_source:$('#content_source').value,content_order:$('#content_order').value,content_dwell:+$('#content_dwell').value,
-  content_text:$('#content_text').value,border_messages:$('#border_messages').checked,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
+  content_text:$('#content_text').value,[borderKey($('#content_source').value)]:$('#border').checked,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
   const r=await post('/api/config',body);if(!r.ok){note('err',r.d.error);return}cfg=r.d;note('ok','Saved. The sign switches over within a second.')};
 $('#send').onclick=async()=>{const r=await post('/api/message',{text:$('#quick').value,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)};
 $('#back').onclick=async()=>{await post('/api/message',{clear:true});note('ok','Back to the program.')};
-(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text'].forEach(k=>$('#'+k).value=cfg[k]);$('#border_messages').checked=!!cfg.border_messages;srcUi();
+(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text'].forEach(k=>$('#'+k).value=cfg[k]);srcUi();
   await listFiles();await openFile(files[0]||'');refreshNow();setInterval(refreshNow,3000);
   fetch('/api/status').then(r=>r.json()).then(s=>$('#name').textContent=s.device_name)})();
 </script></body></html>

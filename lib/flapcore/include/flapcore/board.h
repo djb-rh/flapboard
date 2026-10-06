@@ -61,8 +61,10 @@ class Board {
   CellView view(int cell, uint32_t now_ms) const;
   bool busy(uint32_t now_ms) const;
   uint32_t finishMs() const { return finish_ms_; }   // when the last cell stops
-  // True once per frame for cells that need drawing: while moving, and once
-  // more when they stop. Also true for every cell after resize()/jump().
+  // True once per frame for cells that need drawing: while moving, once more
+  // when they stop, and whenever the resting position differs from the one
+  // last drawn -- so a run that started and landed between two frames (a
+  // late frame, a short run) is still drawn. Also true after resize()/jump().
   bool takeDirty(int cell, uint32_t now_ms);
   void markAllDirty();   // something drew over the board: redraw every cell
 
@@ -80,6 +82,7 @@ class Board {
     uint16_t emitted = 0;  // flaps already reported to the sink
     bool dirty = true;
     bool was_moving = false;
+    uint16_t drawn = 0xFFFF;   // resting position last handed out to draw (0xFFFF: none)
   };
   uint32_t rng();
   int completed(const Cell &c, double now) const;

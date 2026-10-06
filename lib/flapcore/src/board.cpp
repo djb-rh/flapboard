@@ -117,15 +117,21 @@ CellView Board::view(int i, uint32_t now_ms) const {
 bool Board::busy(uint32_t now_ms) const { return now_ms < finish_ms_; }
 
 void Board::markAllDirty() {
-  for (auto &c : cells_) c.dirty = true;
+  for (auto &c : cells_) {
+    c.dirty = true;
+    c.drawn = 0xFFFF;
+  }
 }
 
 bool Board::takeDirty(int i, uint32_t now_ms) {
   Cell &c = cells_[i];
-  const bool moving = view(i, now_ms).moving;
-  const bool d = c.dirty || moving || c.was_moving;   // was_moving: draw the landed state once
-  c.was_moving = moving;
+  const CellView v = view(i, now_ms);
+  // was_moving: draw the landed state once; drawn: the resting face on the
+  // screen isn't the one the cell is at (its whole run fell between frames)
+  const bool d = c.dirty || v.moving || c.was_moving || (!v.moving && v.cur != c.drawn);
+  c.was_moving = v.moving;
   c.dirty = false;
+  if (d) c.drawn = v.moving ? 0xFFFF : v.cur;
   return d;
 }
 

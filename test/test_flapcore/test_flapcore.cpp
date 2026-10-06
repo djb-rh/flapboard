@@ -66,6 +66,26 @@ void test_message_header_and_footer() {
   TEST_ASSERT_EQUAL(kDrum.indexOfChar('B'), g[6 * 3 + 1]);
 }
 
+void test_board_redraws_a_run_that_fell_between_frames() {
+  // A one-flap run (blank -> A) that starts and lands between two frames
+  // must still be drawn: it was showing blank on the screen for good.
+  Board b;
+  b.resize(1, 1, (int)kDrum.size());
+  Motion m;
+  m.flip_ms = 70;
+  m.speed_variance = 0;
+  m.start = StartMode::Together;
+  b.setMotion(m);
+  b.jump({0});
+  TEST_ASSERT_TRUE(b.takeDirty(0, 0));     // the jump
+  TEST_ASSERT_FALSE(b.takeDirty(0, 10));   // nothing new
+  b.show({1}, 100);
+  TEST_ASSERT_TRUE(b.takeDirty(0, 100));   // the new run (not started yet: still blank)
+  TEST_ASSERT_TRUE(b.takeDirty(0, 400));   // next frame long after it landed: draw the A
+  TEST_ASSERT_EQUAL(1, b.view(0, 400).cur);
+  TEST_ASSERT_FALSE(b.takeDirty(0, 420));  // and then it's done
+}
+
 void test_message_argyle_border() {
   MessageOptions o;
   o.argyle_border = true;
@@ -446,6 +466,7 @@ int main() {
   RUN_TEST(test_drum_order);
   RUN_TEST(test_message_center_wrap_tiles);
   RUN_TEST(test_message_argyle_border);
+  RUN_TEST(test_board_redraws_a_run_that_fell_between_frames);
   RUN_TEST(test_message_footer_on_bottom_rows);
   RUN_TEST(test_message_header_and_footer);
   RUN_TEST(test_message_left_keeps_spacing_and_unknowns_blank);

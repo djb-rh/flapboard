@@ -7,3 +7,7 @@ dist/
 src/app/generated/
 build/
 site/
+
+# not part of FlapBoard: personal files and reference images kept beside it
+acsf-pics/
+argyle.jpeg

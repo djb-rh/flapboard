@@ -165,8 +165,8 @@ void loop() {
   {
     config::Reader r;
     brightness = (int)((r.doc()["brightness"] | 80) * 255 / 100);
-    wake_min = r.doc()["tap_wake_minutes"] | 5;
-    motion_min = r.doc()["motion_timeout"] | 10;
+    wake_min = std::max(0, std::min(120, (int)(r.doc()["tap_wake_minutes"] | 5)));   // the web page's ranges
+    motion_min = std::max(1, std::min(240, (int)(r.doc()["motion_timeout"] | 10)));
   }
   if (brightness < 8) brightness = 8;
   schedule::PowerInput in;
@@ -222,7 +222,7 @@ void wake() {
   int minutes;
   {
     config::Reader r;
-    minutes = r.doc()["tap_wake_minutes"] | 5;
+    minutes = std::min(120, (int)(r.doc()["tap_wake_minutes"] | 5));
   }
   if (minutes <= 0) return;
   g_wake_until = millis() + (uint32_t)minutes * 60000;

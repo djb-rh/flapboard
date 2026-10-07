@@ -1,4 +1,4 @@
-// Shared by every page: the (i) help pop-ups. Put
+// Shared by every page: the (i) help pop-ups, and the range of each number field. Put
 //   <button type="button" class="info" data-help="fields" aria-label="Help"></button>
 // next to a field; hovering (or tapping, on a phone) shows the help below.
 (function () {
@@ -52,6 +52,20 @@
   document.addEventListener('click', e => {
     if (!e.target.closest('.info') && !e.target.closest('.pop')) document.querySelectorAll('.pop.open').forEach(p => p.classList.remove('open'));
   });
-  window.fbHelp = () => document.querySelectorAll('button.info').forEach(attach);
+  // Every number field says what it accepts, from its own min and max.
+  function range(inp) {
+    if (inp.dataset.ranged || inp.min === '' || inp.max === '') return;
+    inp.dataset.ranged = '1';
+    const lab = inp.id && document.querySelector('label[for="' + inp.id + '"]');
+    if (!lab) return;
+    const r = document.createElement('span');
+    r.className = 'range';
+    r.textContent = ' (' + inp.min + ' to ' + inp.max + ')';
+    lab.append(r);
+  }
+  window.fbHelp = () => {
+    document.querySelectorAll('button.info').forEach(attach);
+    document.querySelectorAll('input[type=number]').forEach(range);
+  };
   document.addEventListener('DOMContentLoaded', window.fbHelp);
 })();

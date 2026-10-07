@@ -13,12 +13,14 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
 #include "config.h"
 #include "esp_video_device.h"
 #include "esp_video_init.h"
+#include "esp_video_isp_pipeline.h"
 #include "linux/videodev2.h"
 #include "note.h"
 
@@ -117,7 +119,27 @@ bool startCamera() {
     g_status = "the camera would not stream";
     return false;
   }
+  // Auto exposure writes the sensor over SCCB from the ISP's own task, on the
+  // I2C bus M5GFX polls the touch chip on (and switches the Wi-Fi chip's
+  // power through), with nothing serializing the two. Collisions showed up
+  // as touches nobody made and a Wi-Fi chip that would not come back. So it
+  // settles now, before anything else uses the bus, and then runs only in
+  // short bursts while the main loop holds still (exposureBurst()).
+  delay(1500);
+  if (esp_video_isp_pipeline_set_agc_status(ESP_VIDEO_ISP_PIPELINE_AGC_DISABLE) != ESP_OK)
+    note("motion: could not stop auto exposure between bursts");
+  delay(100);   // a write already under way
   return true;
+}
+
+// Auto exposure for a moment, with the main loop (every other I2C user:
+// touch, the IO expanders, the power chip) waiting meanwhile.
+void exposureBurst() {
+  g_pause_until = millis() + 2500;   // a change of exposure is not motion
+  esp_video_isp_pipeline_set_agc_status(ESP_VIDEO_ISP_PIPELINE_AGC_ENABLE);
+  delay(400);
+  esp_video_isp_pipeline_set_agc_status(ESP_VIDEO_ISP_PIPELINE_AGC_DISABLE);
+  delay(100);
 }
 
 // Mean brightness of each grid cell, from every 4th pixel of every 4th row.
@@ -248,15 +270,19 @@ bool needsRestart() {
 }
 
 void loop() {
-  static uint32_t last = 0;
+  static uint32_t last = 0, last_burst = 0;
   if (millis() - last < 1000) return;
   last = millis();
+  if (g_video_ok && millis() - last_burst > 30000) {   // on the main loop, so nothing else is on the bus
+    last_burst = millis();
+    exposureBurst();
+  }
   bool en;
   {
     config::Reader r;
     en = r.doc()["motion_enabled"] | false;
-    g_threshold = r.doc()["motion_threshold"] | 14;
-    g_area = r.doc()["motion_area"] | 1.5f;
+    g_threshold = std::max(4, std::min(60, (int)(r.doc()["motion_threshold"] | 14)));   // the web page's ranges
+    g_area = std::max(0.2f, std::min(50.0f, (float)(r.doc()["motion_area"] | 1.5f)));
   }
   if (en && !g_enabled) g_last_motion = millis();   // switching it on counts as motion
   g_enabled = en && g_video_ok;

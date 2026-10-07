@@ -62,3 +62,5 @@ details.card[open]>summary{margin-bottom:12px}
 .slider{display:flex;gap:14px;align-items:center;margin-top:8px}.slider .lb{min-width:6.5em;color:var(--dim);font-size:14px}.slider input{flex:1;accent-color:var(--accent)}.slider output{min-width:4.5em;text-align:right;font-variant-numeric:tabular-nums}
 [hidden]{display:none!important}
 a{color:var(--accent)}
+label .range{color:var(--dim);opacity:.8;white-space:nowrap}
+input[type=number]:invalid{border-color:var(--bad)}

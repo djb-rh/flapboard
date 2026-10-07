@@ -170,18 +170,46 @@ void setup() {
 // Long press anywhere (0.8 s) opens the quick panel; while it is open, taps
 // go to its buttons. Touch is read here, on the main loop, the only task that
 // talks to the touch chip.
+// Touches that opened the sheet or woke the screen are logged with where
+// they landed, so a sheet that opened by itself (a phantom touch) shows up.
+namespace flapboard {
+uint32_t g_touch_opens = 0, g_touch_wakes = 0;   // shown in the status
+}
 void handleTouch() {
   if (M5.Touch.getCount() == 0 && !M5.Touch.getDetail().wasReleased()) return;
   const auto t = M5.Touch.getDetail();
   if (!power::isOn()) {   // dark: a tap only wakes it
-    if (t.wasPressed()) power::wake();
+    if (t.wasPressed()) {
+      g_touch_wakes++;
+      note("touch: woke the screen (%d,%d)", (int)t.x, (int)t.y);
+      power::wake();
+    }
     return;
   }
   if (sign::panelOpen()) {
     if (t.wasClicked() || t.wasHold()) sign::panelTap(t.x, t.y);
   } else if (t.wasClicked() || t.wasHold()) {   // one tap (or a hold, as before) opens the sheet
+    g_touch_opens++;
+    note("touch: %s at (%d,%d) opened the info sheet", t.wasHold() ? "hold" : "tap", (int)t.x, (int)t.y);
     sign::openPanel();
   }
+}
+
+// Offline, the log can only be read later, and only by this same build (the
+// RAM that survives a restart sits elsewhere in another build, and an update
+// that never gets online is rolled back). So while there is no Wi-Fi, the log
+// goes to the card every 30 s: /flapboard/offline-log.txt.
+void offlineLogToCard() {
+  static uint32_t last = 0;
+  if (net::state() == net::State::Connected || millis() < 45000 || millis() - last < 30000) return;
+  last = millis();
+  if (!sdcard::mounted()) return;
+  FILE *f = fopen("/sdcard/flapboard/offline-log.txt", "w");
+  if (!f) return;
+  fprintf(f, "FlapBoard %s, up %lu s, wifi: %s\n", FLAPBOARD_VERSION, (unsigned long)(millis() / 1000), net::statusText().c_str());
+  for (const auto &l : recentNotes())
+    if (l.find("sound:") == std::string::npos) fprintf(f, "%s\n", l.c_str());
+  fclose(f);
 }
 
 void loop() {
@@ -195,6 +223,7 @@ void loop() {
   power::loop();
   motion::loop();
   mqtt::loop();
+  offlineLogToCard();
   status::update();
   console::loop();
   sign::Action a;

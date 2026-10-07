@@ -44,6 +44,13 @@ Measured with `env:probe` (`src/probe/main.cpp`, driven by `tools/probe.py`).
   passed to `esp_video_init` with `init_sccb = false`. The two sides are not serialized against each
   other (per M5GFX's own comment); 95 s of streaming with `M5.update()` polling touch showed no errors.
   The full feature must keep all other I2C users on the main loop and watch for this.
+- **It did collide** (2026-10-07, after a day with motion sensing on): the ISP's auto exposure (AGC)
+  writes the sensor from its own task whenever it likes. Seen as info-sheet taps nobody made (touch reads
+  garbled mid-transfer) and as a Wi-Fi chip that never came back, twice right after an OTA restart and once
+  after 15 hours (the C6's power/reset go through the IO expanders on the same bus). Fix: AGC runs for
+  1.5 s at camera start, then is switched off with `esp_video_isp_pipeline_set_agc_status()` and only
+  runs in 0.4 s bursts every 30 s from the main loop (motion.cpp `exposureBurst()`), when nothing else
+  is on the bus. Touches that open the sheet are logged with their position to catch any that remain.
 - `esp_video_init` 40 ms. Formats offered on /dev/video0: RAW8 BGGR, RGB565, RGB888, YUV420, UYVY. Only
   1280x720 (the prebuilt's default sensor mode). Streams YUV420 at a steady **30.0 fps** with the ISP's
   auto exposure (mean luma ~115-120 indoors).

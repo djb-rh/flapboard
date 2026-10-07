@@ -107,7 +107,9 @@ $('#bri').oninput=()=>{briBusy=Date.now();$('#briOut').textContent=$('#bri').val
 
 // ---- motion, tap wake and relay ----
 const MKEYS=['motion_timeout','motion_threshold','motion_area','tap_wake_minutes'];
-$('#msave').onclick=async()=>{const b={motion_enabled:$('#motion_enabled').checked};MKEYS.forEach(k=>b[k]=+$('#'+k).value);
+$('#msave').onclick=async()=>{const bad=MKEYS.map(k=>$('#'+k)).find(i=>!i.checkValidity()||i.value==='');
+  if(bad){note('err',document.querySelector('label[for='+bad.id+']').textContent.trim()+': '+bad.value+' is outside what it accepts. Not saved.');bad.focus();return}
+  const b={motion_enabled:$('#motion_enabled').checked};MKEYS.forEach(k=>b[k]=+$('#'+k).value);
   const r=await post('/api/config',b);if(!r.ok){note('err',r.d.error||'Could not save');return}note('ok','Saved.');setTimeout(refresh,800)};
 $('#motion_enabled').onchange=()=>$('#msave').click();   // the box takes effect at once (or offers the restart)
 $('#restartnow').onclick=()=>restart('Restarting to start the camera... this page reloads when the sign is back (about 30 seconds).');
@@ -221,6 +223,7 @@ async function refresh(){
       ['Wi-Fi',wifi],['Address',w.ip?esc(w.ip)+' &middot; '+esc(s.hostname):'-'],['SD card',sdText],
       ['Motion',m.enabled?'watching, last movement '+ago(m.last_motion_s):esc(m.status||'off')],
       ['Motion turned it',(p.motion_offs||0)+' &times; off, '+(p.motion_ons||0)+' &times; on since the last restart'],
+      ['Touches','opened the info sheet '+(s.touch_opens||0)+', woke the screen '+(s.touch_wakes||0)+' since the last restart'],
       ['Clock (RTC)',esc(s.rtc)],['Battery',s.battery.mv+' mV, '+s.battery.percent+'%'+(s.battery.ma>50?' (charging)':'')],
       ['Memory','internal '+size(s.memory.internal_free)+', largest DMA '+size(s.memory.dma_largest)+', PSRAM '+size(s.memory.psram_free)],
       ['Link watchdog',w.pings_ok+' pings ok, '+w.pings_lost+' lost, '+w.watchdog_restarts+' restarts'],

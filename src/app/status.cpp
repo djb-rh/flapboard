@@ -20,6 +20,7 @@
 #include "sound.h"
 
 namespace flapboard {
+extern uint32_t g_touch_opens, g_touch_wakes;   // main.cpp
 namespace status {
 namespace {
 
@@ -74,6 +75,8 @@ std::string json() {
   d["device_name"] = config::deviceName();
   d["hostname"] = config::hostname() + ".local";
   d["uptime_s"] = millis() / 1000;
+  d["touch_opens"] = g_touch_opens;   // touches that opened the info sheet / woke the screen
+  d["touch_wakes"] = g_touch_wakes;
   JsonObject w = d["wifi"].to<JsonObject>();
   const net::State st = net::state();
   w["state"] = st == net::State::Connected ? "connected" : st == net::State::Connecting ? "joining"

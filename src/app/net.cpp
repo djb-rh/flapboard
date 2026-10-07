@@ -56,9 +56,10 @@ const IPAddress kApIp(192, 168, 4, 1);
 struct WatchCounters {
   uint32_t magic;
   Watch w;
+  uint32_t never_joined_restarts;   // see loop(): one try, then setup mode stays
 };
 __NOINIT_ATTR WatchCounters g_wc;
-constexpr uint32_t kWcMagic = 0x57A7C4E2;
+constexpr uint32_t kWcMagic = 0x57A7C4E3;
 
 esp_ping_handle_t g_ping = nullptr;
 volatile uint32_t g_ping_replies = 0;
@@ -326,6 +327,7 @@ void loop() {
       g_state = State::Connected;
       g_ever_connected = true;
       g_offline_since = 0;
+      g_wc.never_joined_restarts = 0;
       startMdns();
       note("wifi: joined %s via %s as http://%s/ (%s.local), rssi %d", g_ssid.c_str(), WiFi.BSSIDstr().c_str(),
            WiFi.localIP().toString().c_str(), config::hostname().c_str(), (int)WiFi.RSSI());
@@ -365,6 +367,17 @@ void loop() {
   if (g_ever_connected && g_offline_since && !g_portal && millis() - g_offline_since > 5 * 60000) {
     g_wc.w.restarts++;
     note("wifi: no link for 5 minutes; restarting to recover");
+    delay(500);
+    ESP.restart();
+  }
+  // A saved network never joined since the start (seen once right after an
+  // update: the screen ran, the Wi-Fi chip never answered): one restart,
+  // which also resets the chip, and puts back the old firmware if this one
+  // is on trial. If that doesn't help either, setup mode stays up.
+  if (!g_ever_connected && !config::secrets::wifiSsid().empty() && millis() > 6 * 60000 &&
+      g_wc.never_joined_restarts == 0 && !(g_portal && WiFi.softAPgetStationNum() > 0)) {
+    g_wc.never_joined_restarts = 1;
+    note("wifi: never joined %s since the start; restarting once to recover", g_ssid.c_str());
     delay(500);
     ESP.restart();
   }

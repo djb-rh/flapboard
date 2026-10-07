@@ -9,11 +9,11 @@
 .kids{margin-left:26px}.hint{font-size:13px;color:var(--dim);margin:6px 0 0}
 .savebar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}</style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/photos" class="on">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<nav><a href="/">Settings</a><a href="/messages">Messages</a><a href="/photos" class="on">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a></nav></div></header>
 <main><div id="note"></div>
 <section class="card"><h2>Photo frame</h2><p id="state" style="margin:0 0 8px">...</p>
 <div class="row" style="margin-top:0"><button id="go">Show photos now</button><button class="sec" id="back">Back to the board</button></div>
-<p class="hint">Add photos in <a href="/library">Files</a>, inside the photos folder (folders inside it work too). Photos uploaded there are shrunk to the screen's size on the way. Photos copied straight onto the card must be PNG or ordinary (baseline) JPEG; others are skipped. The schedule can switch to photos at set times.</p></section>
+<p class="hint">Add photos under <a href="#filesec">Photo files</a>, below (folders inside it work too). Photos uploaded there are shrunk to the screen's size on the way. Photos copied straight onto the card must be PNG or ordinary (baseline) JPEG; others are skipped. The schedule can switch to photos at set times.</p></section>
 
 <section class="card"><h2>How they are shown</h2><div class="g">
 <div><label for="photo_order">Order</label><select id="photo_order"><option value="random">Random</option><option value="name_asc">By name, A to Z</option><option value="name_desc">By name, Z to A</option><option value="date_asc">Oldest first</option><option value="date_desc">Newest first</option></select></div>
@@ -32,7 +32,11 @@
 <div class="tree" id="tree"><span class="dim">Loading...</span></div></section>
 
 <div class="savebar"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
+<details class="card" id="filesec" style="margin-top:16px"><summary>Photo files</summary>
+<p class="hint" style="margin:0 0 12px">The photos folder on the SD card: upload photos or whole folders (drag them here), download, rename or delete them.</p>
+<div id="fm"></div></details>
 </main>
+<script src="/common.js"></script><script src="/files.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -64,4 +68,7 @@ async function status(){try{const s=await (await fetch('/api/status')).json();$(
 (async()=>{const c=await (await fetch('/api/config')).json();
   KEYS.forEach(k=>{const v=c[k];$('#'+k).value=typeof v==='boolean'?(v?'1':'0'):v});
   sel=new Set(c.photo_selection||[]);$('#all').checked=sel.size===0;await folder('photos',$('#tree'));saved=JSON.stringify(body());dirty();status();setInterval(status,5000)})();
+if(location.hash==='#filesec')$('#filesec').open=true;
+new FileManager($('#fm'),{root:'photos',label:'Photos',photos:true,onChange:()=>{folder('photos',$('#tree'));status()}});
+const openFiles=()=>{if(location.hash==='#filesec')$('#filesec').open=true};openFiles();addEventListener('hashchange',openFiles);
 </script></body></html>

@@ -164,9 +164,16 @@ esp_err_t handleRoot(httpd_req_t *req) {
   if (inSetup()) return redirectToSetup(req);
   return sendAsset(req, "/index.html");
 }
-esp_err_t handleLibraryPage(httpd_req_t *req) { return sendAsset(req, "/library.html"); }
+esp_err_t redirectTo(httpd_req_t *req, const char *where) {
+  httpd_resp_set_status(req, "302 Found");
+  httpd_resp_set_hdr(req, "Location", where);
+  httpd_resp_set_type(req, "text/html");
+  return httpd_resp_sendstr(req, "Moved");
+}
+// The Files and Display pages were folded into Messages, Photos and Settings.
+esp_err_t handleLibraryPage(httpd_req_t *req) { return redirectTo(req, "/messages#filesec"); }
 esp_err_t handleSetup(httpd_req_t *req) { return sendAsset(req, "/setup.html"); }
-esp_err_t handleDisplayPage(httpd_req_t *req) { return sendAsset(req, "/display.html"); }
+esp_err_t handleDisplayPage(httpd_req_t *req) { return redirectTo(req, "/messages"); }
 
 // Fonts: the built-in faces and any .ttf in /flapboard/fonts.
 esp_err_t handleFontList(httpd_req_t *req) {

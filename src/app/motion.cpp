@@ -296,6 +296,8 @@ std::string statusJson() {
   JsonDocument d;
   d["enabled"] = (bool)g_enabled;
   d["status"] = g_status;
+  d["camera_running"] = (bool)g_video_ok;
+  d["needs_restart"] = needsRestart();
   d["motion_now"] = active();
   d["last_motion_s"] = g_enabled ? (millis() - g_last_motion) / 1000 : 0;
   d["changed_pct"] = g_last_pct;

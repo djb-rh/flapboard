@@ -5,14 +5,14 @@
 .results{display:grid;gap:6px;margin-top:8px}.results button{text-align:left;font-weight:500}
 .hint{font-size:13px;color:var(--dim);margin:6px 0 0}.big{font:600 28px/1.2 ui-monospace,Menlo,monospace;margin:0}</style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock" class="on">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<nav><a href="/">Settings</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock" class="on">Clock &amp; weather</a></nav></div></header>
 <main><div id="note"></div>
 <section class="card"><h2>Clock</h2><p class="big" id="time">--:--</p><p class="hint" id="clockinfo"></p>
 <div class="grid2">
 <div><label for="timezone">Time zone</label><select id="timezone"></select></div>
 <div><label for="ntp_server">Time server</label><input id="ntp_server"></div>
-<div><label for="time_format">{time} looks like</label><input id="time_format"><div class="sample" id="s_time"></div></div>
-<div><label for="date_format">{date} looks like</label><input id="date_format"><div class="sample" id="s_date"></div></div>
+<div id="formats"><label for="time_format">{time} looks like<button type="button" class="info" data-help="formats" aria-label="Help"></button></label><input id="time_format"><div class="sample" id="s_time"></div></div>
+<div><label for="date_format">{date} looks like<button type="button" class="info" data-help="formats" aria-label="Help"></button></label><input id="date_format"><div class="sample" id="s_date"></div></div>
 </div><p class="hint">Formats: %-I hour, %H 24-hour, %M minutes, %S seconds, %p AM/PM, %a/%A day, %b/%B month, %-d day of month, %Y year.</p></section>
 
 <section class="card"><h2>Location and weather</h2>
@@ -28,16 +28,17 @@
 <p class="hint">Weather by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>. The place search runs from this browser; the sign only keeps the coordinates.</p></section>
 
 <section class="card"><h2>How the clock and weather read</h2>
-<label for="clock_template">Clock message</label><input id="clock_template"><div class="sample" id="s_clock"></div>
+<label for="clock_template">Clock message<button type="button" class="info" data-help="fields" aria-label="Help"></button></label><input id="clock_template"><div class="sample" id="s_clock"></div>
 <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px"><input type="checkbox" id="clock_rb_mode" style="width:auto"> RB Mode: on Fridays, the clock adds this message</label>
 <input id="clock_friday_text" maxlength="120"><div class="sample" id="s_friday"></div>
 <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:12px"><input type="checkbox" id="border_clock" style="width:auto"> Argyle border down each side of the clock</label>
-<label for="weather_template">Weather message</label><input id="weather_template">
+<label for="weather_template">Weather message<button type="button" class="info" data-help="fields" aria-label="Help"></button></label><input id="weather_template">
 <label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:8px"><input type="checkbox" id="border_weather" style="width:auto"> Argyle border down each side of the weather</label><div class="sample" id="s_weather"></div>
 <p class="hint">| starts a new row. Fields: {time} {date} {temp} {feels} {hi} {lo} {hum} {wind} {cond} {place} {units} {wind_units}. A field can carry its own format: {time:%H:%M}. To show one of these, choose it on the <a href="/messages">Messages</a> page, or use the fields inside any message.</p></section>
 
 <div class="row" style="position:sticky;bottom:0;background:var(--bg);padding:10px 0"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
 </main>
+<script src="/common.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));

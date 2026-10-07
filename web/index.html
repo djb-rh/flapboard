@@ -1,32 +1,59 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>FlapBoard</title><link rel="stylesheet" href="/style.css">
-<style>.prog{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin:0 0 12px;display:none}.prog i{display:block;height:100%;background:var(--accent);width:0}.vol{display:flex;gap:14px;align-items:center}.vol input{flex:1;accent-color:var(--accent)}.vol output{min-width:4.5em;text-align:right;font-variant-numeric:tabular-nums}</style></head><body>
+<style>.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 14px}
+.check{display:flex;gap:8px;align-items:center;color:var(--text);font-size:15px}.check input{width:auto}
+.restart{display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:9px 12px;margin:10px 0 0;font-size:14px}</style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/" class="on">Status</a><a href="/display">Display</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<nav><a href="/" class="on">Settings</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a></nav></div></header>
 <main>
 <div id="note"></div>
-<section class="card"><h2>Sound</h2>
-<div class="vol"><button id="mute" class="sec" aria-pressed="false">Mute</button>
-<input type="range" id="vol" min="0" max="100" step="5" aria-label="Volume"><output id="volOut" class="dim"></output></div>
-<p class="dim" style="margin:8px 0 0;font-size:13px">On the sign: press and hold anywhere for volume, mute and its address.</p>
-<p id="sndpause" class="dim" style="margin:6px 0 0;font-size:13px" hidden>Paused while an upload is arriving; it comes back when the upload ends.</p></section>
-<section class="card"><h2>Status</h2><dl id="st"><dt>Loading</dt><dd>...</dd></dl></section>
+<section class="card"><h2>Sound and screen</h2>
+<div class="slider"><span class="lb">Volume</span><input type="range" id="vol" min="0" max="100" step="5" aria-label="Volume"><output id="volOut" class="dim"></output><button id="mute" class="sec" aria-pressed="false" style="min-width:6.5em">Mute</button></div>
+<div class="slider"><span class="lb">Brightness</span><input type="range" id="bri" min="5" max="100" step="5" aria-label="Brightness"><output id="briOut" class="dim"></output><button class="sec" tabindex="-1" aria-hidden="true" style="visibility:hidden;min-width:6.5em">Unmute</button></div>
+<p class="hint">On the sign: tap anywhere for these, its address and what to show.</p>
+<p id="sndpause" class="hint" hidden>Sound is paused while an upload is arriving; it comes back when the upload ends.</p></section>
+
+<section class="card"><h2>Motion sensing</h2>
+<label class="check"><input type="checkbox" id="motion_enabled"> Turn the display and lights off when nobody has moved for a while<button type="button" class="info" data-help="restart" aria-label="Help"></button></label>
+<div id="restartbox" class="restart" hidden><span id="restartwhy">The camera starts when the sign does. Restart to turn motion sensing on.</span><button id="restartnow">Restart now</button></div>
+<div class="g">
+<div><label for="motion_timeout">Off after no motion for (minutes)</label><input id="motion_timeout" type="number" min="1" max="240"></div>
+<div><label for="motion_threshold">Sensitivity (lower = more sensitive)</label><input id="motion_threshold" type="number" min="4" max="60"></div>
+<div><label for="motion_area">Smallest movement (% of the picture)</label><input id="motion_area" type="number" min="0.2" max="50" step="0.1"></div>
+<div><label for="tap_wake_minutes">A tap wakes it for (minutes, 0 = never)</label><input id="tap_wake_minutes" type="number" min="0" max="120"></div>
+</div>
+<p class="hint" id="motionstate"></p>
+<p class="hint" id="motioncount"></p>
+<div class="row"><button id="msave">Save</button><button class="sec" id="look">Check the camera</button><button class="sec" id="lookoff" hidden>Stop</button></div>
+<canvas id="cam" width="320" height="180" style="width:100%;max-width:640px;border-radius:8px;margin-top:10px;background:#000" hidden></canvas>
+<p class="hint">Uses the Tab5's front camera. Pictures are only taken while "Check the camera" is running, for aiming and tuning; red marks the parts of the picture that changed. Nothing is stored or sent anywhere. It needs some light: in a fully dark car the camera sees nothing. Switching the lights or display on or off is not counted as motion. Sleep hours and the schedule are on the <a href="/schedule">Schedule</a> page.</p></section>
+
+<section class="card"><h2>Lights relay</h2><div class="g">
+<div><label for="relay_pin">Relay on</label><select id="relay_pin">
+<option value="-1">No relay</option><option value="53">G53: Grove Port A (Relay unit)</option><option value="54">G54: Grove Port A, white wire</option>
+<option value="2">G2: M5-Bus</option><option value="3">G3: M5-Bus</option><option value="4">G4: M5-Bus</option><option value="16">G16: M5-Bus</option>
+<option value="17">G17: M5-Bus</option><option value="18">G18: M5-Bus</option><option value="45">G45: M5-Bus</option><option value="47">G47: M5-Bus</option>
+<option value="48">G48: M5-Bus</option><option value="51">G51: M5-Bus</option><option value="52">G52: M5-Bus</option></select></div>
+<div><label for="relay_active_high">Relay switches on when the pin is</label><select id="relay_active_high"><option value="1">High (most modules)</option><option value="0">Low</option></select></div>
+</div><div class="row"><button id="rsave">Save</button><button class="sec" id="test">Test the relay</button><span class="dim" id="relaystate"></span></div>
+<p class="hint">The relay follows the display: on together, off together. Use an opto-isolated relay module (or M5Stack's Relay unit on Port A), never a bare relay coil on the pin; if the car's lights run on mains power, the relay and its wiring must be rated and enclosed for it.</p></section>
+
 <section class="card"><h2>This sign</h2>
 <label for="dn">Name (also its network name: <span id="host" class="dim"></span>)</label>
 <input id="dn" maxlength="40" autocomplete="off">
 <div class="row"><button id="save">Save</button></div></section>
+
 <section class="card"><h2>Home Assistant (MQTT)</h2>
 <p class="dim" id="mqst" style="margin:0 0 6px">...</p>
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 14px">
+<div class="g">
 <div><label for="mqh">Broker address</label><input id="mqh" placeholder="homeassistant.local or 10.0.1.5"></div>
 <div><label for="mqp">Port</label><input id="mqp" type="number" value="1883"></div>
 <div><label for="mqu">User name</label><input id="mqu" autocomplete="off"></div>
 <div><label for="mqw">Password</label><input id="mqw" type="password" autocomplete="new-password"></div></div>
 <div class="row"><button id="mqsave" class="sec">Save and connect</button></div>
-<p class="dim" style="font-size:13px">With Home Assistant's MQTT integration, the sign appears by itself: display and lights on/off, a message box, what to show, volume, brightness, sound, next message, motion and diagnostics. Leave the address empty to turn MQTT off. The password is never shown again; leave it blank to keep the saved one.</p></section>
-<section class="card"><h2>Wi-Fi chip</h2><dl id="c6"></dl>
-<div class="row"><button id="c6up" class="sec" disabled>Update Wi-Fi chip firmware</button></div></section>
+<p class="hint">With Home Assistant's MQTT integration, the sign appears by itself: display and lights on/off, a message box, what to show, volume, brightness, sound, next message, motion and diagnostics. Leave the address empty to turn MQTT off. The password is never shown again; leave it blank to keep the saved one.</p></section>
+
 <section class="card"><h2>System</h2>
 <p class="hint" id="fwline"></p>
 <div class="prog" id="prog"><i id="progbar"></i></div>
@@ -34,60 +61,87 @@
 <button id="backup" class="sec">Download backup</button>
 <button id="restbtn" class="sec">Restore backup...</button><input type="file" id="restfile" accept=".json,application/json" hidden>
 <button id="reboot" class="danger">Restart</button></div>
-<p class="hint">A backup holds the settings and message files. Passwords and photos are not included.</p></section>
-<section class="card"><h2>Recent activity</h2><pre class="log" id="log"></pre>
-<div class="row"><button class="sec" id="prevbtn">Before the last restart</button></div><pre class="log" id="prevlog" hidden></pre></section>
+<p class="hint">A backup holds the settings and message files. Passwords and photos are not included.</p>
+<h2 style="margin-top:20px">Wi-Fi chip</h2><dl id="c6"></dl>
+<div class="row"><button id="c6up" class="sec" disabled>Update Wi-Fi chip firmware</button></div></section>
+
+<section class="card" id="sdcard"><h2>SD card</h2>
+<div id="sdmsg"></div>
+<p class="hint" id="sdline"></p>
+<p class="hint">Formatting erases everything on the card and makes it FAT32, which this sign, Windows and macOS all read and
+write (Windows only refuses to <i>format</i> cards over 32 GB as FAT32). The sign restarts to do it; a 128 GB card takes
+under a minute.</p>
+<div class="row"><button id="sdformat" class="danger">Format SD card...</button></div></section>
+
+<details class="card" id="fontsnd"><summary>Fonts and sounds</summary>
+<p class="hint" style="margin-top:0">Extra fonts (.ttf or .otf) put here appear in the font list on the <a href="/messages#look">Messages</a> page. Sounds: mono 16-bit WAV files named <code>clack_*.wav</code> replace the built-in clacks. Neither is needed; the sign has its own.</p>
+<h2 style="margin-top:14px">Fonts</h2><div id="fmfonts"></div>
+<h2 style="margin-top:20px">Sounds</h2><div id="fmsounds"></div></details>
+
+<details class="card" id="statussec"><summary>Status</summary>
+<dl id="st"><dt>Loading</dt><dd>...</dd></dl>
+<h2 style="margin-top:20px">Recent activity</h2><pre class="log" id="log"></pre>
+<div class="row"><button class="sec" id="prevbtn">Before the last restart</button></div><pre class="log" id="prevlog" hidden></pre></details>
 </main>
+<script src="/common.js"></script><script src="/files.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
+function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
+const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>({ok:r.ok,d:await r.json()}));
 function size(n){const u=['B','KB','MB','GB','TB'];let i=0;while(n>=1000&&i<u.length-1){n/=1000;i++}return (i?n.toFixed(1):n)+' '+u[i]}
-function up(s){const h=Math.floor(s/3600),m=Math.floor(s/60)%60;return (h?h+' h ':'')+m+' min'}
-let edited=false;$('#dn').oninput=()=>edited=true;
-let volBusy=0,soundOn=true;
+function up(s){const h=Math.floor(s/3600),m=Math.floor(s/60)%60;return (h>=48?Math.floor(h/24)+' d '+(h%24)+' h ':h?h+' h ':'')+m+' min'}
+function ago(s){return s<0?'never':s<90?s+' s ago':s<5400?Math.round(s/60)+' min ago':up(s)+' ago'}
+// Waits for the sign to come back from a restart, then reloads the page.
+function reloadWhenBack(maxMs,onGiveUp){const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(3000)})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
+  if(Date.now()-t0<maxMs)setTimeout(wait,3000);else onGiveUp()},8000)}
+async function restart(msg){await fetch('/api/reboot',{method:'POST'}).catch(()=>{});note('ok',msg||'Restarting... this page reloads when the sign is back.');reloadWhenBack(120000,()=>note('err','The sign has not come back yet. Check it, then reload this page.'))}
+
+// ---- sound and brightness (sent as you slide) ----
+let volBusy=0,briBusy=0,soundOn=true,volTimer=null,briTimer=null;
 function showVol(v,on){soundOn=on;$('#volOut').textContent=on?v+'%':'muted';$('#mute').textContent=on?'Mute':'Unmute';$('#mute').setAttribute('aria-pressed',on?'false':'true')}
 async function sendVol(body){const r=await fetch('/api/volume',{method:'POST',body:JSON.stringify(body)});const d=await r.json();showVol(d.volume,d.enabled);$('#vol').value=d.volume}
-let volTimer=null;
 $('#vol').oninput=()=>{volBusy=Date.now();showVol($('#vol').value,soundOn);clearTimeout(volTimer);volTimer=setTimeout(()=>sendVol({volume:+$('#vol').value}),150)};
 $('#mute').onclick=()=>{volBusy=Date.now();sendVol({enabled:!soundOn})};
-async function refresh(){
-  try{
-    const s=await (await fetch('/api/status')).json();
-    $('#name').textContent=s.device_name;document.title=s.device_name;
-    if(!edited)$('#dn').value=s.device_name;$('#host').textContent=s.hostname;
-    if(Date.now()-volBusy>3000){$('#vol').value=s.sound.volume;showVol(s.sound.volume,s.sound.enabled)}
-    $('#sndpause').hidden=!s.sound.paused_for_upload;
-    const w=s.wifi;
-    const wifi=w.state==='connected'?'<span class="good">connected</span> to '+esc(w.ssid)+' ('+w.rssi+' dBm)':'<span class="warn">'+esc(w.state)+'</span> '+esc(w.ssid);
-    const rows=[['Wi-Fi',wifi],['Address',w.ip?esc(w.ip)+' &middot; '+esc(s.hostname):'-'],
-      ['SD card',s.sd.mounted?size(s.sd.total_bytes-s.sd.free_bytes)+' used, '+size(s.sd.free_bytes)+' free of '+size(s.sd.total_bytes)+' ('+esc(s.sd.bus)+')':'<span class="bad">'+({none:'no card',exfat:'exFAT, cannot read',ntfs:'NTFS, cannot read',unformatted:'not formatted'}[s.sd.problem]||'cannot read')+'</span>'+(s.sd.problem==='none'?'':' (<a href="/library">format it</a>)')],
-      ['Clock (RTC)',esc(s.rtc)],['Battery',s.battery.mv+' mV, '+s.battery.percent+'%'+(s.battery.ma>50?' (charging)':'')],
-      ['Memory','internal '+size(s.memory.internal_free)+', largest DMA '+size(s.memory.dma_largest)+', PSRAM '+size(s.memory.psram_free)],
-      ['Link watchdog',w.pings_ok+' pings ok, '+w.pings_lost+' lost, '+w.watchdog_restarts+' restarts'],
-      ['Up',up(s.uptime_s)],['Firmware',esc(s.version)]];
-    $('#fwline').textContent='Running FlapBoard '+s.version+(s.app_slot?' from '+s.app_slot:'')+'.';
-    $('#st').innerHTML=rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('');
-    const c=s.wifi_chip;
-    $('#c6').innerHTML='<dt>Firmware</dt><dd>'+esc(c.firmware)+'</dd><dt>This build expects</dt><dd>'+esc(c.expected)+'</dd><dt>State</dt><dd>'+(c.update_available?'<span class="warn">update available</span>':'<span class="good">matches</span>')+'</dd>';
-    $('#c6up').disabled=!c.update_available;
-    const l=await (await fetch('/api/log')).json();
-    $('#log').textContent=l.slice().reverse().join('\n');
-  }catch(e){}
-}
-$('#save').onclick=async()=>{
-  const r=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_name:$('#dn').value.trim()})});
-  const d=await r.json();edited=false;
-  if(r.ok)note('ok','Saved. The new network name takes effect after a restart.');else note('err',d.error||'Could not save');refresh();
-};
-$('#c6up').onclick=async()=>{if(!confirm('Download and flash the matching Wi-Fi chip firmware? The sign restarts when it is done (a minute or two).'))return;
-  const r=await fetch('/api/c6update',{method:'POST'});const d=await r.json();note(r.ok?'ok':'err',r.ok?'Updating the Wi-Fi chip... this page will come back after the restart.':d.error)};
+$('#bri').oninput=()=>{briBusy=Date.now();$('#briOut').textContent=$('#bri').value+'%';clearTimeout(briTimer);briTimer=setTimeout(()=>post('/api/config',{brightness:+$('#bri').value}),400)};
+
+// ---- motion, tap wake and relay ----
+const MKEYS=['motion_timeout','motion_threshold','motion_area','tap_wake_minutes'];
+$('#msave').onclick=async()=>{const b={motion_enabled:$('#motion_enabled').checked};MKEYS.forEach(k=>b[k]=+$('#'+k).value);
+  const r=await post('/api/config',b);if(!r.ok){note('err',r.d.error||'Could not save');return}note('ok','Saved.');setTimeout(refresh,800)};
+$('#motion_enabled').onchange=()=>$('#msave').click();   // the box takes effect at once (or offers the restart)
+$('#restartnow').onclick=()=>restart('Restarting to start the camera... this page reloads when the sign is back (about 30 seconds).');
+$('#rsave').onclick=async()=>{const r=await post('/api/config',{relay_pin:+$('#relay_pin').value,relay_active_high:$('#relay_active_high').value==='1'});
+  note(r.ok?'ok':'err',r.ok?'Saved.':(r.d.error||'Could not save'));setTimeout(refresh,800)};
+$('#test').onclick=async()=>{await post('/api/power',{relay_test:3});note('ok','Flipping the relay off and on three times (6 seconds), then back to normal.');setTimeout(refresh,500)};
+// "Check the camera": a snapshot every second with the changed cells over it.
+let camTimer=null;
+async function camFrame(){try{
+  const [pr,vr]=await Promise.all([fetch('/api/motion/snapshot'),fetch('/api/motion/view')]);
+  if(!pr.ok){$('#motionstate').textContent=(await pr.json()).error;stopCam();return}
+  const buf=new Uint8Array(await pr.arrayBuffer());let i=0,nl=0;while(nl<3)if(buf[i++]===10)nl++;
+  const cv=$('#cam'),ctx=cv.getContext('2d'),img=ctx.createImageData(320,180);
+  for(let p=0;p<320*180;p++){img.data[p*4]=buf[i+p*3];img.data[p*4+1]=buf[i+p*3+1];img.data[p*4+2]=buf[i+p*3+2];img.data[p*4+3]=255}
+  ctx.putImageData(img,0,0);
+  if(vr.ok){const v=new Uint8Array(await vr.arrayBuffer());ctx.fillStyle='rgba(255,40,40,.45)';
+    for(let y=0;y<45;y++)for(let x=0;x<80;x++)if(v[3600+y*80+x])ctx.fillRect(x*4,y*4,4,4)}}catch(e){}}
+function stopCam(){clearInterval(camTimer);camTimer=null;$('#look').hidden=false;$('#lookoff').hidden=true}
+$('#look').onclick=()=>{$('#cam').hidden=false;$('#look').hidden=true;$('#lookoff').hidden=false;camFrame();camTimer=setInterval(camFrame,1000);setTimeout(stopCam,120000)};
+$('#lookoff').onclick=stopCam;
+
+// ---- this sign, MQTT ----
+let edited=false;$('#dn').oninput=()=>edited=true;
+$('#save').onclick=async()=>{const r=await post('/api/config',{device_name:$('#dn').value.trim()});edited=false;
+  if(r.ok)note('ok','Saved. The new network name takes effect after a restart.');else note('err',r.d.error||'Could not save');refresh()};
 let mqLoaded=false;
-async function mqRefresh(){try{const m=await (await fetch('/api/mqtt')).json();$('#mqst').textContent=(m.connected?'Connected':m.state)+'. Topics: '+m.topic_base+'/...'+(m.password_stored?' (password saved)':'');
-  if(!mqLoaded){const c=await (await fetch('/api/config')).json();$('#mqh').value=c.mqtt_host;$('#mqp').value=c.mqtt_port;$('#mqu').value=c.mqtt_user;mqLoaded=true}}catch(e){}}
+async function mqRefresh(c){try{const m=await (await fetch('/api/mqtt')).json();$('#mqst').textContent=(m.connected?'Connected':m.state)+'. Topics: '+m.topic_base+'/...'+(m.password_stored?' (password saved)':'');
+  if(!mqLoaded&&c){$('#mqh').value=c.mqtt_host;$('#mqp').value=c.mqtt_port;$('#mqu').value=c.mqtt_user;mqLoaded=true}}catch(e){}}
 $('#mqsave').onclick=async()=>{const r=await fetch('/api/mqtt',{method:'POST',body:JSON.stringify({host:$('#mqh').value.trim(),port:+$('#mqp').value||1883,user:$('#mqu').value.trim(),password:$('#mqw').value})});
   $('#mqw').value='';note(r.ok?'ok':'err',r.ok?'Saved. Connecting...':'Could not save');setTimeout(mqRefresh,4000)};
-mqRefresh();setInterval(mqRefresh,8000);
+$('#c6up').onclick=async()=>{if(!confirm('Download and flash the matching Wi-Fi chip firmware? The sign restarts when it is done (a minute or two).'))return;
+  const r=await fetch('/api/c6update',{method:'POST'});const d=await r.json();note(r.ok?'ok':'err',r.ok?'Updating the Wi-Fi chip... this page will come back after the restart.':d.error)};
+
+// ---- firmware, backups ----
 // Firmware and backups go up in 16 KB pieces, the size the Tab5's Wi-Fi
 // link takes reliably; a piece that fails is retried with the same offset.
 async function pieces(url,params,blob,onProgress){
@@ -109,8 +163,7 @@ $('#fwfile').onchange=async function(){const f=this.files[0];this.value='';if(!f
   const r=await pieces('/api/ota',{},f,bar);bar(null);
   if(!r.ok){busy(false);note('err',r.data.error||'Update failed');return}
   note('ok','Installed. Restarting into the new firmware; this page reloads when the sign is back.');
-  const t0=Date.now();setTimeout(async function wait(){try{const s=await (await fetch('/api/status',{cache:'no-store',signal:AbortSignal.timeout(3000)})).json();if(s.uptime_s<120){location.reload();return}}catch(e){}
-    if(Date.now()-t0<180000)setTimeout(wait,3000);else{busy(false);note('err','The sign has not come back yet. Check it, then reload this page.')}},8000)};
+  reloadWhenBack(180000,()=>{busy(false);note('err','The sign has not come back yet. Check it, then reload this page.')})};
 $('#backup').onclick=()=>{location.href='/api/backup'};
 $('#restbtn').onclick=()=>$('#restfile').click();
 $('#restfile').onchange=async function(){const f=this.files[0];this.value='';if(!f)return;
@@ -119,12 +172,74 @@ $('#restfile').onchange=async function(){const f=this.files[0];this.value='';if(
   const n=Object.keys(j.messages||{}).length;
   if(!confirm('Restore settings'+(n?' and '+n+' message file'+(n>1?'s':''):'')+' from '+f.name+(j.device_name?' ('+j.device_name+', '+j.version+')':'')+'? Message files with the same names are replaced.'))return;
   busy(true);bar(0);
-  const up=await pieces('/library/upload_part',{path:'',name:'restore.json'},f,bar);bar(null);
-  if(!up.ok||!up.data.saved){busy(false);note('err',(up.data&&up.data.error)||'Could not send the backup');return}
-  const r=await fetch('/api/restore',{method:'POST',body:JSON.stringify({file:up.data.saved[0]})});const d=await r.json();busy(false);
-  note(r.ok?'ok':'err',r.ok?'Restored '+d.settings+' settings and '+d.messages+' message files.':d.error);refresh()};
+  const upl=await pieces('/library/upload_part',{path:'',name:'restore.json'},f,bar);bar(null);
+  if(!upl.ok||!upl.data.saved){busy(false);note('err',(upl.data&&upl.data.error)||'Could not send the backup');return}
+  const r=await post('/api/restore',{file:upl.data.saved[0]});busy(false);
+  note(r.ok?'ok':'err',r.ok?'Restored '+r.d.settings+' settings and '+r.d.messages+' message files.':r.d.error);load()};
+$('#reboot').onclick=()=>{if(confirm('Restart the sign?'))restart()};
+
+// ---- SD card ----
+const SDWHY={exfat:'The card is formatted exFAT, which this sign cannot read. Format it here as FAT32 (this erases it).',
+  ntfs:'The card is formatted NTFS, which this sign cannot read. Format it here as FAT32 (this erases it).',
+  unformatted:'The card is not formatted. Format it here.',
+  unknown:'The card is in a format this sign cannot read, or damaged. Formatting it here as FAT32 usually fixes that (this erases it).',
+  none:'No SD card found. Put one in and restart the sign.'};
+let sdDone=false;
+$('#sdformat').onclick=async()=>{
+  const t=prompt('This erases EVERYTHING on the SD card: photos, messages, fonts, sounds. Download a backup first if you need the messages (System, above).\n\nType ERASE to format it.');
+  if(t!=='ERASE'){if(t!==null)note('err','Not formatted: type ERASE in capitals to confirm.');return}
+  const r=await post('/api/sdformat',{confirm:'ERASE'});
+  if(!r.ok){note('err',r.d.error||'Could not start the format');return}
+  sdDone=true;$('#sdformat').disabled=true;$('#sdmsg').innerHTML='<div class="msg ok">Restarting to format the card. This page reloads when the sign is back (about a minute).</div>';
+  reloadWhenBack(240000,()=>$('#sdmsg').innerHTML='<div class="msg err">The sign has not come back yet. Check it, then reload this page.</div>')};
 $('#prevbtn').onclick=async()=>{const p=$('#prevlog');if(!p.hidden){p.hidden=true;return}
   try{const l=await (await fetch('/api/log?prev=1')).json();p.textContent=l.length?l.join('\n'):'Nothing kept (the last start was a power-up).';p.hidden=false}catch(e){}};
-$('#reboot').onclick=async()=>{if(!confirm('Restart the sign?'))return;await fetch('/api/reboot',{method:'POST'});note('ok','Restarting...')};
-refresh();setInterval(refresh,5000);
+
+// ---- status, every 5 seconds ----
+let fms=false;
+async function refresh(){
+  try{
+    const s=await (await fetch('/api/status')).json();
+    $('#name').textContent=s.device_name;document.title=s.device_name;
+    if(!edited)$('#dn').value=s.device_name;$('#host').textContent=s.hostname;
+    if(Date.now()-volBusy>3000){$('#vol').value=s.sound.volume;showVol(s.sound.volume,s.sound.enabled)}
+    $('#sndpause').hidden=!s.sound.paused_for_upload;
+    const m=s.motion,p=s.power;
+    $('#restartbox').hidden=!m.needs_restart;
+    $('#motionstate').textContent=m.enabled?('Watching. Last movement '+ago(m.last_motion_s)+'; '+Number(m.changed_pct).toFixed(1)+'% of the picture changed just now.'):(m.needs_restart?'':'Camera: '+(m.status||'off')+'.');
+    $('#motioncount').textContent=(m.enabled||p.motion_offs)?'Since the last restart, motion sensing has turned the display off '+p.motion_offs+' time'+(p.motion_offs===1?'':'s')+
+      ' (last '+ago(p.motion_last_off_s)+') and back on '+p.motion_ons+' time'+(p.motion_ons===1?'':'s')+' (last '+ago(p.motion_last_on_s)+').':'';
+    $('#relaystate').textContent=p.relay_pin<0?'No relay set.':'Relay on G'+p.relay_pin+' is '+(p.relay_on?'on':'off')+'.';
+    const w=s.wifi;
+    const wifi=w.state==='connected'?'<span class="good">connected</span> to '+esc(w.ssid)+' ('+w.rssi+' dBm)':'<span class="warn">'+esc(w.state)+'</span> '+esc(w.ssid);
+    const sdBad=!s.sd.mounted,why=sdBad?(s.sd.problem||'unknown'):'';
+    const sdText=s.sd.mounted?size(s.sd.total_bytes-s.sd.free_bytes)+' used, '+size(s.sd.free_bytes)+' free of '+size(s.sd.total_bytes)+' ('+esc(s.sd.bus)+')':'<span class="bad">'+({none:'no card',exfat:'exFAT, cannot read',ntfs:'NTFS, cannot read',unformatted:'not formatted'}[s.sd.problem]||'cannot read')+'</span>';
+    if(!sdDone){$('#sdmsg').innerHTML=why?'<div class="msg err">'+esc(SDWHY[why]||SDWHY.unknown)+'</div>':'';$('#sdformat').disabled=why==='none'}
+    $('#sdline').innerHTML=sdText;
+    if(!fms&&s.sd.mounted){fms=true;new FileManager($('#fmfonts'),{root:'fonts',label:'Fonts'});new FileManager($('#fmsounds'),{root:'sounds',label:'Sounds'})}
+    const rows=[['Showing',esc(s.content.source)+' ('+esc(s.content.reason)+')'],['Display',(p.on?'on':'off')+': '+esc(p.reason)],
+      ['Wi-Fi',wifi],['Address',w.ip?esc(w.ip)+' &middot; '+esc(s.hostname):'-'],['SD card',sdText],
+      ['Motion',m.enabled?'watching, last movement '+ago(m.last_motion_s):esc(m.status||'off')],
+      ['Motion turned it',(p.motion_offs||0)+' &times; off, '+(p.motion_ons||0)+' &times; on since the last restart'],
+      ['Clock (RTC)',esc(s.rtc)],['Battery',s.battery.mv+' mV, '+s.battery.percent+'%'+(s.battery.ma>50?' (charging)':'')],
+      ['Memory','internal '+size(s.memory.internal_free)+', largest DMA '+size(s.memory.dma_largest)+', PSRAM '+size(s.memory.psram_free)],
+      ['Link watchdog',w.pings_ok+' pings ok, '+w.pings_lost+' lost, '+w.watchdog_restarts+' restarts'],
+      ['Up',up(s.uptime_s)],['Firmware',esc(s.version)]];
+    $('#fwline').textContent='Running FlapBoard '+s.version+(s.app_slot?' from '+s.app_slot:'')+'.';
+    $('#st').innerHTML=rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('');
+    const c=s.wifi_chip;
+    $('#c6').innerHTML='<dt>Firmware</dt><dd>'+esc(c.firmware)+'</dd><dt>This build expects</dt><dd>'+esc(c.expected)+'</dd><dt>State</dt><dd>'+(c.update_available?'<span class="warn">update available</span>':'<span class="good">matches</span>')+'</dd>';
+    $('#c6up').disabled=!c.update_available;
+    if($('#statussec').open){const l=await (await fetch('/api/log')).json();$('#log').textContent=l.slice().reverse().join('\n')}
+  }catch(e){}
+}
+$('#statussec').addEventListener('toggle',refresh);
+async function load(){try{const c=await (await fetch('/api/config')).json();
+  if(Date.now()-briBusy>3000){$('#bri').value=c.brightness;$('#briOut').textContent=c.brightness+'%'}
+  $('#motion_enabled').checked=c.motion_enabled;MKEYS.forEach(k=>$('#'+k).value=c[k]);
+  $('#relay_pin').value=String(c.relay_pin);$('#relay_active_high').value=c.relay_active_high?'1':'0';
+  mqRefresh(c)}catch(e){}}
+if(location.hash==='#status')$('#statussec').open=true;
+if(location.hash==='#fonts')$('#fontsnd').open=true;
+load();refresh();setInterval(refresh,5000);setInterval(()=>mqRefresh(),8000);
 </script></body></html>

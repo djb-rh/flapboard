@@ -2,55 +2,267 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Messages - FlapBoard</title><link rel="stylesheet" href="/style.css">
 <style>
+/* Wide screens: the preview pinned on the left, the settings scrolling beside
+   it. Narrow screens: one column, nothing pinned, so the preview can never
+   cover the fields being edited; "What to show" comes first. */
+main{max-width:1400px}header .in{max-width:1400px}
+.wrap{display:grid;grid-template-columns:minmax(0,1fr);grid-template-areas:"show" "preview" "settings";gap:16px}
+.wrap>.show{grid-area:show;min-width:0}.wrap>.preview{grid-area:preview;min-width:0}.wrap>.settings{grid-area:settings;display:grid;gap:16px;min-width:0;align-content:start}
+.wrap .card{margin-bottom:0}
+@media (min-width:1000px){.wrap{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);grid-template-areas:"preview show" "preview settings";align-items:start}
+  .preview{position:sticky;top:64px}}
+canvas{width:100%;aspect-ratio:16/9;display:block;border-radius:10px;border:1px solid var(--border);background:#000}
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:4px 14px}
+.inline{display:flex;gap:8px;align-items:center}.inline input[type=color]{width:44px;height:36px;padding:2px;border:1px solid var(--border);border-radius:6px;background:var(--panel)}
+.chk{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--dim)}
+.check{display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px}.check input{width:auto}
 textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;color:var(--text);background:var(--panel);border:1px solid var(--border);border-radius:8px}
-#editor{min-height:300px}.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:4px 14px}
+#editor{min-height:300px}
 .files{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px}.files label{display:flex;gap:6px;align-items:center;margin:0;color:var(--text);font-size:14px}
 .msgs{display:grid;gap:8px;margin-top:12px}.m{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--panel2)}
 .m pre{margin:0;flex:1;min-width:0;font:13px/1.45 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word}
-.m small{color:var(--dim);display:block;margin-top:4px}.now{font:15px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;background:var(--panel2);border-radius:8px;padding:10px 12px;margin:0}
-.hint{font-size:13px;color:var(--dim);margin:6px 0 0}
+.m small{color:var(--dim);display:block;margin-top:4px}
+.savebar{position:sticky;bottom:0;z-index:4;background:var(--bg);padding:10px 0;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#fitwarn{color:var(--warn);font-size:13px}
+.more{margin-top:16px}
 </style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/">Status</a><a href="/display">Display</a><a href="/messages" class="on">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a><a href="/library">Files</a></nav></div></header>
+<nav><a href="/">Settings</a><a href="/messages" class="on">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a></nav></div></header>
 <main><div id="note"></div>
-<section class="card"><h2>On the sign now</h2><pre class="now" id="now">...</pre><p class="hint" id="nowinfo"></p></section>
-
-<section class="card"><h2>What to show</h2><div class="grid2">
+<div class="wrap">
+<section class="card show"><h2>What to show</h2><div class="grid2">
 <div><label for="content_source">Show</label><select id="content_source"><option value="messages">Messages from the library</option><option value="clock">The clock</option><option value="weather">The weather</option><option value="text">One fixed message</option><option value="photos">Photos (set up on the Photos page)</option></select></div>
 <div><label for="content_order">Order</label><select id="content_order"><option value="random">Random</option><option value="sequential">In file order</option></select></div>
 <div><label for="content_dwell">Seconds per message</label><input id="content_dwell" type="number" min="3" max="3600"></div>
 </div>
-<div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div>
-</div>
-<div id="affixbox" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)"><label>Extra lines for messages from the library</label>
-<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:4px"><input type="checkbox" id="msg_prefix_on" style="width:auto"> Before each message</label>
+<div id="filesbox"><label>Files (none ticked = all of them)</label><div class="files" id="files"></div></div>
+<div id="textbox"><label for="content_text">Fixed message<button type="button" class="info" data-help="fields" aria-label="Help"></button></label><textarea id="content_text" rows="3"></textarea></div>
+<div id="affixbox" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)"><label>Extra lines for messages from the library<button type="button" class="info" data-help="fields" aria-label="Help"></button></label>
+<label class="check" style="margin-top:4px"><input type="checkbox" id="msg_prefix_on"> Before each message</label>
 <input id="msg_prefix" placeholder="{time}"><div class="sample" id="s_prefix"></div>
-<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="msg_suffix_on" style="width:auto"> After each message</label>
+<label class="check"><input type="checkbox" id="msg_suffix_on"> After each message</label>
 <input id="msg_suffix" placeholder="{date}"><div class="sample" id="s_suffix"></div>
-<p class="hint">Fields work here, like in messages: {time} {date} {temp} {cond} {place} and the rest; | starts a new row. The lines before go on the top rows and the lines after on the bottom rows, with the message centred between. They share the board with the message: keep your message paragraphs short enough to leave room for them, or the bottom lines of a long message won't show.</p></div>
-<div id="textbox"><label for="content_text">Fixed message</label><textarea id="content_text" rows="3"></textarea></div>
-<label id="borderrow" style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:10px"><input type="checkbox" id="border" style="width:auto"> <span id="borderlbl">Argyle border down each side</span></label>
-<div class="row"><button id="saveprog">Save</button></div>
-<p class="hint">The clock and weather layouts are on the <a href="/clock">Clock &amp; weather</a> page. The <a href="/schedule">Schedule</a> page can switch between these by day and time.</p></section>
+<p class="hint">The lines before go on the top rows and the lines after on the bottom rows, with the message centred between. They share the board with the message: keep your message paragraphs short enough to leave room for them, or the bottom lines of a long message won't show.</p></div>
+<label class="check" id="borderrow"><input type="checkbox" id="border"> <span id="borderlbl">Argyle border down each side</span></label>
+<p class="hint">The clock and weather layouts are on the <a href="/clock">Clock &amp; weather</a> page; the slideshow on the <a href="/photos">Photos</a> page. The <a href="/schedule">Schedule</a> page can switch between these by day and time.</p></section>
 
-<section class="card"><h2>Show something now</h2>
+<div class="preview"><canvas id="cv" width="1280" height="720" aria-label="Preview of the sign"></canvas>
+<p class="hint" id="info"></p>
+<p class="hint" id="nowinfo"></p>
+<label for="trymsg">Preview text<button type="button" class="info" data-help="fields" aria-label="Help"></button></label>
+<textarea id="trymsg" rows="3" aria-label="Preview text">WELCOME ABOARD|THE FLAPBOARD EXPRESS</textarea>
+<div class="row"><button id="fromsign" class="sec">What's on the sign now</button><button id="trysend" class="sec">Show this on the sign</button></div></div>
+
+<div class="settings">
+<section class="card"><h2>Board</h2><div class="grid2">
+<div><label for="board_rows">Rows</label><input id="board_rows" type="number" min="1" max="12"></div>
+<div><label for="board_cols">Characters per row</label><input id="board_cols" type="number" min="1" max="40"></div>
+<div><label for="flap_width">Flap width (px, 0 = largest that fits)</label><input id="flap_width" type="number" min="0" max="400"></div>
+<div><label for="flap_aspect">Flap height / width</label><input id="flap_aspect" type="number" min="0.8" max="2.5" step="0.05"></div>
+<div><label for="flap_gap">Gap between flaps (px)</label><input id="flap_gap" type="number" min="0" max="40"></div>
+<div><label for="board_margin">Margin (px)</label><input id="board_margin" type="number" min="0" max="200"></div>
+<div><label for="glyph_size">Letter size (% of flap height)</label><input id="glyph_size" type="number" min="30" max="90"></div>
+<div><label for="orientation">Mounted</label><select id="orientation"><option value="landscape">Landscape</option><option value="landscape_flipped">Landscape, upside down</option></select></div>
+</div><p class="hint" id="fitwarn"></p></section>
+
+<section class="card" id="look"><h2>Look</h2><div class="grid2">
+<div><label for="theme">Theme</label><select id="theme"><option value="solari">Station (black)</option><option value="vesta">Home board (charcoal)</option><option value="amber">Amber letters</option><option value="white">White flaps</option></select></div>
+<div><label for="font">Font</label><select id="font"></select></div>
+<div><label>Background</label><div class="inline"><input type="color" id="c_background"><label class="chk"><input type="checkbox" id="u_background"> custom</label></div></div>
+<div><label>Flaps</label><div class="inline"><input type="color" id="c_flap"><label class="chk"><input type="checkbox" id="u_flap"> custom</label></div></div>
+<div><label>Letters</label><div class="inline"><input type="color" id="c_glyph"><label class="chk"><input type="checkbox" id="u_glyph"> custom</label></div></div>
+</div><p class="hint">More fonts: upload a .ttf under <a href="/#fonts">Settings &gt; Fonts and sounds</a>. Letters only; the colour tiles keep their colours.</p></section>
+
+<section class="card"><h2>Side pictures</h2><div class="grid2">
+<div><label for="side_left">Left</label><select id="side_left"></select><button class="sec" id="up_left" style="margin-top:6px">Upload...</button></div>
+<div><label for="side_right">Right</label><select id="side_right"></select><button class="sec" id="up_right" style="margin-top:6px">Upload...</button></div>
+<div><label for="side_width">Width (% of screen, each)</label><input id="side_width" type="number" min="5" max="40"></div>
+<div><label for="side_fit">Fit</label><select id="side_fit"><option value="contain">Whole picture</option><option value="cover">Fill and crop</option></select></div>
+<div><label>Behind the picture</label><div class="inline"><input type="color" id="side_background"></div></div>
+</div><input type="file" id="sidepicker" accept="image/*" hidden>
+<p class="hint">Uploads are resized here in the browser to exactly fit their strip, so the sign draws them sharp. They are kept in messages/side-pictures (see Message files, below).</p></section>
+
+<section class="card"><h2>Flaps</h2><div class="grid2">
+<div><label for="flip_ms">Time per flap (ms)</label><input id="flip_ms" type="number" min="20" max="400" step="5"></div>
+<div><label for="speed_variance">Speed difference between modules (%)</label><input id="speed_variance" type="number" min="0" max="20" step="0.5"></div>
+<div><label for="start_mode">Cells start</label><select id="start_mode"><option value="random">With a small random delay</option><option value="together">All at once</option><option value="wave">Left to right</option></select></div>
+</div></section>
+
+<div class="savebar"><button id="save">Save to the sign</button><button id="revert" class="sec">Undo changes</button><span class="dim" id="dirty"></span></div>
+</div></div>
+
+<details class="card more" id="quicksec"><summary>Show something now</summary>
+<label for="quick" style="margin-top:0">Message<button type="button" class="info" data-help="fields" aria-label="Help"></button></label>
 <textarea id="quick" rows="3" placeholder="LATE ARRIVAL|TRACK 4"></textarea>
 <div class="row"><label for="secs" style="margin:0">for</label><input id="secs" type="number" min="0" max="86400" value="60" style="width:7em"><span class="dim">seconds (0 = until cleared)</span>
-<button id="send">Show now</button><button id="back" class="sec">Back to the program</button></div></section>
+<button id="send">Show now</button><button id="back" class="sec">Back to the program</button></div></details>
 
-<section class="card"><h2>Library</h2>
+<details class="card" id="libsec"><summary>Library editor</summary>
 <div class="row" style="margin-top:0"><select id="file" style="max-width:280px"></select><button class="sec" id="newf">New file</button><button class="danger" id="delf">Delete file</button></div>
-<label for="editor">Messages are separated by a blank line. Each line is a row; | alone is an empty row. Options on a first line: @left @right @top @hold 45.
-Fields: {time} {date} {temp} {hi} {lo} {cond} {place} {name} {ip}. Tiles: {R} {O} {Y} {G} {B} {V} {W} {K}.</label>
+<label for="editor">Messages are separated by a blank line; each line is a row.<button type="button" class="info" data-help="options" aria-label="Help"></button> Fields like {time}<button type="button" class="info" data-help="fields" aria-label="Help"></button></label>
 <textarea id="editor" spellcheck="false" aria-label="Message file"></textarea>
 <div class="row"><button id="savef">Save file</button><span class="dim" id="fstate"></span></div>
-<div class="msgs" id="msgs"></div></section>
+<div class="msgs" id="msgs"></div></details>
+
+<details class="card" id="filesec"><summary>Message files</summary>
+<p class="hint" style="margin:0 0 12px">The message folder on the SD card: upload .txt files made elsewhere, download, rename or delete them.</p>
+<div id="fm"></div></details>
 </main>
+<script src="/common.js"></script><script src="/files.js"></script><script src="/layout.js"></script>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 function note(kind,text){$('#note').innerHTML='<div class="msg '+kind+'">'+esc(text)+'</div>';scrollTo({top:0,behavior:'smooth'});if(kind==='ok')setTimeout(()=>$('#note').innerHTML='',4000)}
 const post=(u,b)=>fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(async r=>({ok:r.ok,d:await r.json()}));
+let cfg={};          // the sign's config as last loaded or saved
+let fm=null;         // the message file manager
+const lib={};        // the library editor's hooks, for the file manager
+
+// ===== What to show, and the display settings: one save for both =====
+(function(){
+// The argyle border is set per program; this box follows whichever "Show" is chosen.
+function borderKey(s){return s==='clock'?'border_clock':s==='weather'?'border_weather':'border_messages'}
+const BORDER_LBL={border_clock:'Argyle border down each side of the clock',border_weather:'Argyle border down each side of the weather',
+  border_messages:'Argyle border down each side of messages (the library, the fixed message and messages sent from here)'};
+const BORDERS=['border_messages','border_clock','border_weather'];
+let borders={};      // the three border settings as edited (the box shows one)
+// Mirrors lib/flapcore/src/theme.cpp and drum.cpp.
+const THEMES={solari:{bg:'#0B0C0D',top:'#2A2D31',bot:'#222528',glyph:'#F2EFE4',hinge:'#050506',corner:.08},
+  vesta:{bg:'#141414',top:'#1E1E1E',bot:'#191919',glyph:'#F5F5F0',hinge:'#0A0A0A',corner:.04},
+  amber:{bg:'#0B0C0D',top:'#2A2D31',bot:'#222528',glyph:'#FFB23A',hinge:'#050506',corner:.08},
+  white:{bg:'#D8D8D4',top:'#F4F3EE',bot:'#E8E7E1',glyph:'#16181A',hinge:'#B0B0AC',corner:.08}};
+const TILES={R:'#D22F27',O:'#F07A1E',Y:'#F2C22B',G:'#1E964B',B:'#1E7FCB',V:'#7B3FA0',W:'#EEECE4',K:'#080808',a:'#7BAFD4',b:'#7BAFD4',c:'#7BAFD4',d:'#7BAFD4'};
+const DRUM=" ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$()-+&=;:'\"%,./?°";
+const NUM=['board_rows','board_cols','flap_width','flap_aspect','flap_gap','board_margin','glyph_size','side_width','flip_ms','speed_variance','content_dwell'];
+const SEL=['orientation','theme','font','side_left','side_right','side_fit','start_mode','content_source','content_order','content_text','msg_prefix','msg_suffix'];
+const CHK=['msg_prefix_on','msg_suffix_on'];
+let saved={},cur={},images={};
+function scale(hex,k){const v=parseInt(hex.slice(1),16);const c=[(v>>16)&255,(v>>8)&255,v&255].map(x=>Math.min(255,Math.round(x*k/256)));return '#'+c.map(x=>x.toString(16).padStart(2,'0')).join('')}
+function theme(c){const t=Object.assign({},THEMES[c.theme]||THEMES.solari);
+  if(c.color_background){t.bg=c.color_background;t.hinge=scale(c.color_background,120)}
+  if(c.color_flap){t.top=c.color_flap;t.bot=scale(c.color_flap,225)}
+  if(c.color_glyph)t.glyph=c.color_glyph;return t}
+// The message layout (lib/flapcore/src/message.cpp): rows of cells, each a
+// character or a tile, centred, wrapped at spaces.
+function layoutMessage(text,rows,cols){
+  const lines=[];
+  for(const raw of text.split(/\n|\|/)){
+    const cells=[];for(let i=0;i<raw.length;){const m=raw.slice(i).match(/^\{([ROYGBVWKabcd])\}/);
+      if(m){cells.push({t:m[1]});i+=3;continue}const ch=raw[i].toUpperCase();cells.push({c:DRUM.includes(ch)?ch:' '});i++}
+    while(cells.length&&cells[0].c===' ')cells.shift();while(cells.length&&cells[cells.length-1].c===' ')cells.pop();
+    if(cells.length<=cols){lines.push(cells);continue}
+    let line=[],word=[];const flush=()=>{if(!word.length)return;
+      while(word.length>cols){if(line.length){lines.push(line);line=[]}lines.push(word.slice(0,cols));word=word.slice(cols)}
+      if(line.length+(line.length?1:0)+word.length>cols&&line.length){lines.push(line);line=[]}
+      if(line.length)line.push({c:' '});line=line.concat(word);word=[]};
+    for(const c of cells){if(c.c===' '){flush()}else word.push(c)}flush();if(line.length)lines.push(line)}
+  while(lines.length>1&&!lines[lines.length-1].length)lines.pop();
+  const out=lines.slice(0,rows),grid=[];const top=Math.trunc((rows-out.length)/2);
+  for(let r=0;r<rows;r++){const l=out[r-top]||[];const pad=Math.trunc((cols-l.length)/2);const row=[];
+    for(let c=0;c<cols;c++)row.push(l[c-pad]||{c:' '});grid.push(row)}
+  return grid}
+function rr(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function drawSide(ctx,rect,path,c){if(!rect.w)return;ctx.fillStyle=c.side_background||'#000';ctx.fillRect(rect.x,rect.y,rect.w,rect.h);
+  const img=images[path];if(!img||!img.complete||!img.naturalWidth)return;
+  const k=c.side_fit==='cover'?Math.max(rect.w/img.naturalWidth,rect.h/img.naturalHeight):Math.min(rect.w/img.naturalWidth,rect.h/img.naturalHeight);
+  const w=img.naturalWidth*k,h=img.naturalHeight*k;ctx.save();ctx.beginPath();ctx.rect(rect.x,rect.y,rect.w,rect.h);ctx.clip();
+  ctx.drawImage(img,rect.x+(rect.w-w)/2,rect.y+(rect.h-h)/2,w,h);ctx.restore()}
+function layoutOf(c){return computeLayout({rows:+c.board_rows,cols:+c.board_cols,flap_w:+c.flap_width,aspect:+c.flap_aspect,gap:+c.flap_gap,
+  margin:+c.board_margin,left_image:!!c.side_left,right_image:!!c.side_right,side_pct:+c.side_width})}
+function draw(){
+  const c=cur,cv=$('#cv'),ctx=cv.getContext('2d'),t=theme(c),L=layoutOf(c);
+  ctx.fillStyle=t.bg;ctx.fillRect(0,0,1280,720);
+  drawSide(ctx,L.left,c.side_left,c);drawSide(ctx,L.right,c.side_right,c);
+  const grid=layoutMessage($('#trymsg').value,+c.board_rows,+c.board_cols);
+  const cw=L.cell_w,ch=L.cell_h,h1=Math.trunc(ch/2),rad=t.corner*cw,cap=ch*(+c.glyph_size/100);
+  ctx.font=`${Math.round(cap/0.7)}px "${c.font}"`;const m=ctx.measureText('H');const capPx=m.actualBoundingBoxAscent||cap*0.7;
+  const fs=Math.round(cap/0.7*cap/capPx);ctx.font=`${fs}px "${c.font}"`;ctx.textAlign='center';ctx.textBaseline='alphabetic';
+  for(let r=0;r<grid.length;r++)for(let col=0;col<grid[r].length;col++){
+    const x=L.board.x+col*L.pitch_x,y=L.board.y+r*L.pitch_y,cell=grid[r][col];
+    ctx.save();rr(ctx,x,y,cw,ch,rad);ctx.clip();
+    if(cell.t){ctx.fillStyle=TILES[cell.t];ctx.fillRect(x,y,cw,ch)}
+    else{ctx.fillStyle=t.top;ctx.fillRect(x,y,cw,h1);ctx.fillStyle=t.bot;ctx.fillRect(x,y+h1,cw,ch-h1);
+      if(cell.c!==' '){ctx.fillStyle=t.glyph;ctx.fillText(cell.c,x+cw/2,y+(ch+cap)/2)}}
+    ctx.restore();ctx.fillStyle=t.hinge;const line=ch>=90?2:1,inset=t.corner*cw*0.3;ctx.fillRect(x+inset,y+h1-Math.trunc(line/2),cw-2*inset,line)}
+  $('#info').textContent=`Flaps ${cw} x ${ch} px. Board ${L.board.w} x ${L.board.h} px of 1280 x 720.`+(c.side_left||c.side_right?` Side strips ${L.left.w||L.right.w} x ${L.left.h||L.right.h} px.`:'');
+  $('#fitwarn').textContent=L.fits?'':'That flap width does not fit: the sign uses the largest that does.';
+  $('#dirty').textContent=JSON.stringify(cur)!==JSON.stringify(saved)?'Unsaved changes (the preview shows them)':'Saved';
+}
+function readForm(){const c={};NUM.forEach(k=>c[k]=+$('#'+k).value);SEL.forEach(k=>c[k]=$('#'+k).value);CHK.forEach(k=>c[k]=$('#'+k).checked);
+  for(const k of ['background','flap','glyph'])c['color_'+k]=$('#u_'+k).checked?$('#c_'+k).value.toUpperCase():'';
+  c.side_background=$('#side_background').value.toUpperCase();
+  borders[borderKey(c.content_source)]=$('#border').checked;BORDERS.forEach(k=>c[k]=!!borders[k]);
+  c.content_files=[...$('#files').querySelectorAll('input:checked')].map(i=>i.value);return c}
+function fillForm(c){NUM.forEach(k=>$('#'+k).value=c[k]);SEL.forEach(k=>{const el=$('#'+k);
+  if(el.tagName==='SELECT'&&c[k]&&![...el.options].some(o=>o.value===c[k]))el.add(new Option(c[k],c[k]));el.value=c[k]??''});
+  CHK.forEach(k=>$('#'+k).checked=!!c[k]);
+  const t=THEMES[c.theme]||THEMES.solari;const def={background:t.bg,flap:t.top,glyph:t.glyph};
+  for(const k of ['background','flap','glyph']){const v=c['color_'+k];$('#u_'+k).checked=!!v;$('#c_'+k).value=(v||def[k]).toLowerCase()}
+  $('#side_background').value=(c.side_background||'#000000').toLowerCase();
+  BORDERS.forEach(k=>borders[k]=!!c[k]);
+  $('#files').querySelectorAll('input').forEach(i=>i.checked=(c.content_files||[]).includes(i.value));srcUi()}
+function srcUi(){const s=$('#content_source').value;$('#filesbox').hidden=$('#affixbox').hidden=s!=='messages';$('#textbox').hidden=s!=='text';$('#content_order').disabled=s!=='messages';
+  const k=borderKey(s);$('#borderrow').hidden=s==='photos';$('#borderlbl').textContent=BORDER_LBL[k]+' (uses two columns each side)';$('#border').checked=!!borders[k]}
+function loadImage(p){if(!p||images[p])return;const img=new Image();img.onload=draw;img.src='/library/download?path='+encodeURIComponent(p);images[p]=img}
+function onChange(){cur=readForm();loadImage(cur.side_left);loadImage(cur.side_right);draw()}
+async function loadFonts(){const r=await (await fetch('/api/fonts')).json();const sel=$('#font');sel.innerHTML='';
+  for(const f of r.fonts){sel.add(new Option(f.name.replace(/-Regular$/,'')+(f.source==='card'?' (SD card)':''),f.name));
+    try{const ff=new FontFace(f.name,`url(/fonts/${encodeURIComponent(f.name)}.ttf)`);document.fonts.add(await ff.load())}catch(e){}}}
+async function loadImages(){const sels=[$('#side_left'),$('#side_right')];
+  let list=[];try{const d=await (await fetch('/library/list?path=messages/side-pictures')).json();list=d.entries.filter(e=>e.is_image)}catch(e){}
+  for(const s of sels){const keep=s.value;s.innerHTML='<option value="">None</option>';for(const e of list)s.add(new Option(e.name,e.path));if(keep)s.value=keep}}
+// The library's file list, as ticks under "What to show" (kept in step with the form).
+lib.ticks=files=>{const keep=cur.content_files||cfg.content_files||[];
+  $('#files').innerHTML=files.map(f=>'<label><input type="checkbox" value="'+esc(f)+'"'+(keep.includes(f)?' checked':'')+'>'+esc(f)+'</label>').join('')||'<span class="dim">No message files yet.</span>'};
+lib.sides=loadImages;
+// What the before/after lines expand to right now, from the sign itself.
+let affixT=null;
+function affixSamples(){clearTimeout(affixT);affixT=setTimeout(async()=>{for(const k of ['prefix','suffix']){
+  const v=$('#msg_'+k).value,on=$('#msg_'+k+'_on').checked;let txt='';
+  if(on&&v){try{txt=(await (await fetch('/api/content?expand='+encodeURIComponent(v))).json()).text.split('|').join('\n')}catch(e){}}
+  $('#s_'+k).textContent=txt}},250)}
+let side='left';
+$('#up_left').onclick=()=>{side='left';$('#sidepicker').click()};$('#up_right').onclick=()=>{side='right';$('#sidepicker').click()};
+$('#sidepicker').onchange=async function(){const f=this.files[0];if(!f)return;this.value='';
+  const c=Object.assign({},cur,{['side_'+side]:'x'});const L=layoutOf(c);const slot=L[side];
+  const img=await fbUpload.loadImage(f).catch(()=>null);
+  if(!img){note('err','That file is not an image this browser can read.');return}
+  const cv=document.createElement('canvas');cv.width=slot.w;cv.height=slot.h;const ctx=cv.getContext('2d');
+  ctx.fillStyle=cur.side_background||'#000';ctx.fillRect(0,0,slot.w,slot.h);
+  const k=cur.side_fit==='cover'?Math.max(slot.w/img.naturalWidth,slot.h/img.naturalHeight):Math.min(slot.w/img.naturalWidth,slot.h/img.naturalHeight);
+  const w=img.naturalWidth*k,h=img.naturalHeight*k;ctx.imageSmoothingQuality='high';ctx.drawImage(img,(slot.w-w)/2,(slot.h-h)/2,w,h);
+  const blob=await new Promise(r=>cv.toBlob(r,'image/png'));
+  const name=side+'-'+f.name.replace(/\.[^.]+$/,'').replace(/[^A-Za-z0-9 _-]/g,'').slice(0,40)+'.png';
+  const res=await fbUpload.putInPieces('messages/side-pictures',name,blob);const d=res.data||{};
+  if(!res.ok){note('err',d.error||'Upload failed');return}
+  await loadImages();const p=d.saved[0];$('#side_'+side).value=p;onChange();if(fm&&fm.listed)fm.go(fm.cwd);
+  note('ok','Uploaded '+p+' at '+slot.w+' x '+slot.h+' px. Save to put it on the sign.')};
+document.querySelectorAll('.show input,.show select,.show textarea,.settings input,.settings select').forEach(el=>{if(el.id!=='sidepicker'&&el.id!=='content_source'){el.addEventListener('input',onChange);el.addEventListener('change',onChange)}});
+$('#files').addEventListener('change',onChange);
+['msg_prefix','msg_suffix','msg_prefix_on','msg_suffix_on'].forEach(id=>{$('#'+id).addEventListener('input',affixSamples);$('#'+id).addEventListener('change',affixSamples)});
+$('#content_source').addEventListener('change',()=>{srcUi();onChange()});
+$('#trymsg').addEventListener('input',draw);
+$('#save').onclick=async()=>{const r=await post('/api/config',cur);
+  if(!r.ok){note('err',r.d.error||'Could not save');return}cfg=r.d;saved=JSON.parse(JSON.stringify(cur));draw();note('ok','Saved. The sign switches over in a moment.')};
+$('#revert').onclick=()=>{fillForm(saved);onChange();affixSamples()};
+$('#trysend').onclick=async()=>{const r=await post('/api/message',{text:$('#trymsg').value});note(r.ok?'ok':'err',r.ok?'Sent to the sign. "Back to the program" (under Show something now) ends it.':'Could not send')};
+let shown='';
+$('#fromsign').onclick=()=>{if(shown){$('#trymsg').value=shown;draw()}};
+async function refreshNow(){try{const s=await (await fetch('/api/content')).json();shown=(s.shown||'').replace(/\n/g,'|');
+  $('#nowinfo').textContent='On the sign now: '+(s.override?'a message sent from here or MQTT':s.source+(s.file?' ('+s.file+')':''))+'. '+s.messages+' messages in the library.'}catch(e){}}
+lib.init=async()=>{try{await loadFonts();await loadImages();cfg=await (await fetch('/api/config')).json();
+  const keep={};[...NUM,...SEL,...CHK,...BORDERS,'color_background','color_flap','color_glyph','side_background','content_files'].forEach(k=>keep[k]=cfg[k]);
+  await lib.list();fillForm(keep);saved=readForm();cur=readForm();loadImage(cur.side_left);loadImage(cur.side_right);affixSamples();
+  await refreshNow();if(shown&&!/^\s*$/.test(shown.replace(/\|/g,'')))$('#trymsg').value=shown;draw();setInterval(refreshNow,3000);
+  const s=await (await fetch('/api/status')).json();$('#name').textContent=s.device_name}catch(e){note('err','Could not reach the sign')}};
+})();
+
+// ===== Show something now =====
+$('#send').onclick=async()=>{const r=await post('/api/message',{text:$('#quick').value,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)};
+$('#back').onclick=async()=>{await post('/api/message',{clear:true});note('ok','Back to the program.')};
+
+// ===== Library editor =====
+(function(){
 // The same rules as src/app/content_parse.cpp.
 function parseFile(text){const out=[];let rows=[],m={align:'centre',hold:0,top:false};
   const finish=()=>{if(rows.length)out.push(Object.assign({text:rows.join('\n')},m));rows=[];m={align:'centre',hold:0,top:false}};
@@ -59,47 +271,29 @@ function parseFile(text){const out=[];let rows=[],m={align:'centre',hold:0,top:f
     if(t[0]==='@'&&!rows.length){const w=t.split(/\s+/);for(let i=0;i<w.length;i++){if(w[i]==='@left')m.align='left';else if(w[i]==='@right')m.align='right';
       else if(w[i]==='@center')m.align='centre';else if(w[i]==='@top')m.top=true;else if(w[i]==='@hold')m.hold=parseInt(w[++i])||0}continue}
     rows.push(t==='|'?'':line)}finish();return out}
-let files=[],cur='',savedText='',cfg={};
-async function listFiles(){const d=await (await fetch('/library/list?path=messages')).json();files=d.entries.filter(e=>!e.dir&&/\.txt$/i.test(e.name)).map(e=>e.name);
-  const sel=$('#file'),keep=cur;sel.innerHTML='';files.forEach(f=>sel.add(new Option(f,f)));if(files.includes(keep))sel.value=keep;
-  $('#files').innerHTML=files.map(f=>'<label><input type="checkbox" value="'+esc(f)+'"'+((cfg.content_files||[]).includes(f)?' checked':'')+'>'+esc(f)+'</label>').join('')||'<span class="dim">No message files yet.</span>'}
-async function openFile(f){cur=f;if(!f){$('#editor').value='';renderMsgs();return}
+let files=[],cur='',savedText='';
+lib.list=async()=>{const d=await (await fetch('/library/list?path=messages')).json();files=d.entries.filter(e=>e.type!=='dir'&&/\.txt$/i.test(e.name)).map(e=>e.name);
+  const sel=$('#file'),keep=cur;sel.innerHTML='';files.forEach(f=>sel.add(new Option(f,f)));if(files.includes(keep))sel.value=keep;lib.ticks(files);
+  if(!files.includes(cur)&&$('#editor').value===savedText)openFile(files[0]||'')};
+async function openFile(f){cur=f;if(!f){savedText='';$('#editor').value='';renderMsgs();return}
   const r=await fetch('/library/download?path='+encodeURIComponent('messages/'+f));savedText=r.ok?await r.text():'';$('#editor').value=savedText;renderMsgs()}
 function renderMsgs(){const ms=parseFile($('#editor').value);$('#fstate').textContent=($('#editor').value!==savedText?'Unsaved changes. ':'')+ms.length+' message'+(ms.length===1?'':'s');
   $('#msgs').innerHTML=ms.map((m,i)=>'<div class="m"><div style="flex:1;min-width:0"><pre>'+esc(m.text)+'</pre><small>'+m.align+(m.top?', top':'')+(m.hold?', '+m.hold+' s':'')+'</small></div><button class="sec" data-i="'+i+'">Show now</button></div>').join('');
   $('#msgs').querySelectorAll('button').forEach(b=>b.onclick=async()=>{const m=ms[+b.dataset.i];const r=await post('/api/message',{text:m.text,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)})}
-// The argyle border is set per program; this box follows whichever "Show" is chosen.
-function borderKey(s){return s==='clock'?'border_clock':s==='weather'?'border_weather':'border_messages'}
-const BORDER_LBL={border_clock:'Argyle border down each side of the clock',border_weather:'Argyle border down each side of the weather',
-  border_messages:'Argyle border down each side of messages (the library, the fixed message and messages sent from here)'};
-// What the before/after lines expand to right now, from the sign itself.
-let affixT=null;
-function affixSamples(){clearTimeout(affixT);affixT=setTimeout(async()=>{for(const k of ['prefix','suffix']){
-  const v=$('#msg_'+k).value,on=$('#msg_'+k+'_on').checked;let txt='';
-  if(on&&v){try{txt=(await (await fetch('/api/content?expand='+encodeURIComponent(v))).json()).text.split('|').join('\n')}catch(e){}}
-  $('#s_'+k).textContent=txt}},250)}
-['msg_prefix','msg_suffix','msg_prefix_on','msg_suffix_on'].forEach(id=>{$('#'+id).addEventListener('input',affixSamples);$('#'+id).addEventListener('change',affixSamples)});
-function srcUi(){const s=$('#content_source').value;$('#filesbox').hidden=s!=='messages';$('#textbox').hidden=s!=='text';$('#content_order').disabled=s!=='messages';
-  const k=borderKey(s);$('#borderrow').hidden=s==='photos';$('#borderlbl').textContent=BORDER_LBL[k]+' (uses two columns each side)';$('#border').checked=!!cfg[k]}
-async function refreshNow(){try{const s=await (await fetch('/api/content')).json();$('#now').textContent=s.shown||'(blank)';
-  $('#nowinfo').textContent=(s.override?'A message sent from here or MQTT. ':'From the program: '+s.source+(s.file?' ('+s.file+')':'')+'. ')+s.messages+' messages in the library.'}catch(e){}}
-$('#file').onchange=()=>{if($('#editor').value!==savedText&&!window.__confirmLeave){note('err','Save or undo your changes to '+cur+' first (or press Open again).');window.__confirmLeave=true;$('#file').value=cur;return}window.__confirmLeave=false;openFile($('#file').value)};
+let leave=false;
+$('#file').onchange=()=>{if($('#editor').value!==savedText&&!leave){note('err','Save or undo your changes to '+cur+' first (or pick the file again to drop them).');leave=true;$('#file').value=cur;return}leave=false;openFile($('#file').value)};
 $('#editor').oninput=renderMsgs;
 $('#savef').onclick=async()=>{if(!cur){note('err','Make a file first.');return}const r=await post('/api/messages/save',{file:cur,text:$('#editor').value});
-  if(!r.ok){note('err',r.d.error);return}savedText=$('#editor').value;renderMsgs();note('ok','Saved '+r.d.saved+' ('+r.d.messages+' messages).')};
+  if(!r.ok){note('err',r.d.error);return}savedText=$('#editor').value;renderMsgs();note('ok','Saved '+r.d.saved+' ('+r.d.messages+' messages).');if(fm&&fm.listed)fm.go(fm.cwd)};
 $('#newf').onclick=async()=>{let i=1,f;do f='new-'+(i++)+'.txt';while(files.includes(f));
-  const r=await post('/api/messages/save',{file:f,text:'NEW MESSAGE\n'});if(!r.ok){note('err',r.d.error);return}await listFiles();$('#file').value=f;openFile(f);note('ok','Made '+f+'. Rename it in Files if you like.')};
+  const r=await post('/api/messages/save',{file:f,text:'NEW MESSAGE\n'});if(!r.ok){note('err',r.d.error);return}cur=f;savedText='';await lib.list();$('#file').value=f;openFile(f);
+  if(fm&&fm.listed)fm.go(fm.cwd);note('ok','Made '+f+'. Rename it under Message files, below, if you like.')};
 let delArmed=false;$('#delf').onclick=async()=>{if(!cur)return;if(!delArmed){delArmed=true;$('#delf').textContent='Really delete '+cur+'?';setTimeout(()=>{delArmed=false;$('#delf').textContent='Delete file'},4000);return}
-  delArmed=false;$('#delf').textContent='Delete file';const r=await post('/library/delete',{path:'messages/'+cur});if(!r.ok){note('err',r.d.error);return}note('ok','Deleted '+cur+'.');cur='';await listFiles();openFile(files[0]||'')};
-$('#content_source').onchange=srcUi;
-$('#saveprog').onclick=async()=>{const body={content_source:$('#content_source').value,content_order:$('#content_order').value,content_dwell:+$('#content_dwell').value,
-  content_text:$('#content_text').value,msg_prefix_on:$('#msg_prefix_on').checked,msg_prefix:$('#msg_prefix').value,
-  msg_suffix_on:$('#msg_suffix_on').checked,msg_suffix:$('#msg_suffix').value,[borderKey($('#content_source').value)]:$('#border').checked,content_files:[...$('#files').querySelectorAll('input:checked')].map(i=>i.value)};
-  const r=await post('/api/config',body);if(!r.ok){note('err',r.d.error);return}cfg=r.d;note('ok','Saved. The sign switches over within a second.')};
-$('#send').onclick=async()=>{const r=await post('/api/message',{text:$('#quick').value,seconds:+$('#secs').value});note(r.ok?'ok':'err',r.ok?'Showing it now.':r.d.error)};
-$('#back').onclick=async()=>{await post('/api/message',{clear:true});note('ok','Back to the program.')};
-(async()=>{cfg=await (await fetch('/api/config')).json();['content_source','content_order','content_dwell','content_text','msg_prefix','msg_suffix'].forEach(k=>$('#'+k).value=cfg[k]);
-  $('#msg_prefix_on').checked=!!cfg.msg_prefix_on;$('#msg_suffix_on').checked=!!cfg.msg_suffix_on;affixSamples();srcUi();
-  await listFiles();await openFile(files[0]||'');refreshNow();setInterval(refreshNow,3000);
-  fetch('/api/status').then(r=>r.json()).then(s=>$('#name').textContent=s.device_name)})();
+  delArmed=false;$('#delf').textContent='Delete file';const r=await post('/library/delete',{path:'messages/'+cur});if(!r.ok){note('err',r.d.error);return}note('ok','Deleted '+cur+'.');cur='';savedText=$('#editor').value;await lib.list();if(fm&&fm.listed)fm.go(fm.cwd)};
+})();
+
+// ===== Message files =====
+for(const id of ['quicksec','libsec','filesec'])if(location.hash==='#'+id)$('#'+id).open=true;
+fm=new FileManager($('#fm'),{root:'messages',label:'Messages',onChange:()=>{lib.list();lib.sides()}});
+lib.init();
 </script></body></html>

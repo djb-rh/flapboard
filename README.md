@@ -28,34 +28,40 @@ esptool.py --chip esp32p4 write_flash 0 flapboard-0.9.0.bin
 ### First start
 
 Put in a microSD card. The sign reads **FAT32**; most cards over 32 GB come formatted exFAT, which
-it can't read. It says so on the info sheet and the Files page, and **Files > Format SD card**
+it can't read. It says so on the info sheet and the Settings page, and **Settings > SD card > Format SD card**
 turns the card into FAT32 (this erases it). Windows and macOS read and write the result normally;
 Windows only refuses to *format* large cards as FAT32. The sign makes its folders on the card.
 
 The sign opens a Wi-Fi hotspot called **FlapBoard-XXXX**. Join it from a phone; the setup page
 opens by itself. Pick your network and type its password. After that the sign is at
-`http://flapboard.local/`, or at the address shown when you **press and hold anywhere on the
-screen** (a single tap does it too). The info sheet that opens also has the brightness and volume controls, a QR code for the
-web page, and buttons to switch between messages, clock, weather and photos.
+`http://flapboard.local/`, or at the address shown when you **tap anywhere on the screen**. The
+info sheet that opens has the address and a QR code for the web page, volume and brightness, buttons
+to switch between messages, weather/clock and photos, **Next** (the next message or photo), and
+**Status**, a page of how the sign is doing.
 
 ## Using it
 
 The web page has a tab for each part:
 
-- **Status:** what is showing and why, volume, Wi-Fi, SD card, Home Assistant, firmware update,
-  backup and restore, and recent activity.
-- **Display:** rows and columns, cell size and spacing, font, colour theme, flip speed, and
-  pictures beside the board (kept in `messages/side-pictures/`; slideshow photos go in `photos/`). A live preview shows the layout before you save.
+- **Settings:** volume and brightness, motion sensing (with the camera check, and a Restart button
+  when turning it on needs one), the lights relay, the sign's name, Home Assistant, firmware update,
+  backup and restore, the Wi-Fi chip, formatting the SD card, extra fonts and sounds, and a Status
+  section with how the sign is doing and recent activity.
 - **Messages:** what to show (message files, clock, weather, fixed text, photos), in what order and
-  for how long. Messages can also be sent to show now, for a while or until cleared.
+  for how long; then the board itself, with a live preview: rows and columns, cell size and spacing,
+  font, colour theme, flip speed, and pictures beside the board (kept in `messages/side-pictures/`).
+  Below that: show a message now, the message file editor, and the message folder's files.
 - **Photos:** the slideshow: all photos, a folder or a selection; random or by name or date;
-  dissolve or cut; and an optional clock in a corner.
-- **Schedule:** which program shows when, one-off dates, sleep hours, and the motion sensor.
+  dissolve, slide or cut; an optional clock in a corner; and the photo folder's files. Photos
+  uploaded there are shrunk to the screen size in the browser before they go up.
+- **Schedule:** which program shows when, one-off dates and sleep hours.
   A rule that runs past midnight belongs to the day it started on.
 - **Clock & weather:** time zone, NTP server, time and date formats, and the weather location
   ([Open-Meteo](https://open-meteo.com/), no key needed).
-- **Files:** the SD card. Upload, download, rename, delete. Photos put in `photos/` are shrunk to
-  the screen size in the browser before they go up.
+
+The (i) buttons next to text fields list the fields that fill themselves in, such as `{date}`.
+
+Motion sensing counts how often it has turned the display off and back on (Settings > Status).
 
 ### Message files
 
@@ -87,11 +93,11 @@ Messages, the clock and the weather can use `{time}`, `{date}`, `{name}`, `{ip}`
 ### Sounds
 
 The clacks are made by the sign itself. To use your own, put mono 16-bit WAV files named
-`clack_*.wav` in `sounds/`.
+`clack_*.wav` in `sounds/` (Settings > Fonts and sounds).
 
 ## Home Assistant (MQTT)
 
-Set the broker on the Status page. The sign announces itself by MQTT discovery as one device:
+Set the broker on the Settings page. The sign announces itself by MQTT discovery as one device:
 display on/off, message text, program select, volume, brightness, sound switch, a Next button, a
 motion sensor, and diagnostics. Topics are under `flapboard/<id>/`, for example:
 
@@ -107,7 +113,7 @@ motion sensor, and diagnostics. Topics are under `flapboard/<id>/`, for example:
 ## Relay output
 
 A relay follows the display: on when the sign is on, off when it sleeps, is held off, or motion
-times out. Set the pin on the Schedule page (Screen and lights) and use the test button there.
+times out. Set the pin on the Settings page (Lights relay) and use the test button there.
 
 The easiest connection is the Tab5's **Port A** (the red Grove socket): red is **5 V**, black is
 **GND**, yellow is **G53** and white is **G54**. Port A's 5 V is switched on only while a relay pin
@@ -118,7 +124,7 @@ If the lights run on mains voltage, the module must be rated for it and enclosed
 
 ## Firmware updates and backups
 
-**Status > System > Update firmware** takes `flapboard-<version>-update.bin` from a release and
+**Settings > System > Update firmware** takes `flapboard-<version>-update.bin` from a release and
 keeps all settings and files. A new firmware runs on trial: if it cannot start and join Wi-Fi,
 the next restart goes back to the old one by itself.
 
@@ -131,7 +137,7 @@ passwords and photos are not included. **Restore backup** puts them back, on thi
   at build time by `tools/embed_web.py`.
 - `pio test -e native`: the tests for the parts that do not need the hardware.
 - `tools/prep_photos.py OUT SRC...` and `tools/put_folder.py HOST OUT photos/NAME`: shrink a big
-  photo collection on the computer (as the Files page would) and upload it with thumbnails.
+  photo collection on the computer (as the Photos page would) and upload it with thumbnails.
 - `tools/release.sh`: release images in `dist/` and the web installer in `site/`.
 - For development, `include/secrets.h` (gitignored) can hold `WIFI_SSID` and `WIFI_PASSWORD`
   to skip the setup hotspot; release builds leave it out.

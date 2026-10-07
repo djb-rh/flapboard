@@ -234,6 +234,17 @@ void loop() {
       note("update: firmware %s on %s confirmed after a healthy start", FLAPBOARD_VERSION, run->label);
     }
   }
+  // An hourly line in the log (kept across restarts): enough to see a slow
+  // leak or a fading signal over a long run.
+  static uint32_t health_ms = 0;
+  if (millis() - health_ms > 3600000UL) {
+    health_ms = millis();
+    if (millis() > 60000)
+      note("health: up %luh, internal %u KB (largest DMA %u KB), PSRAM %u KB, wifi %d dBm", (unsigned long)(millis() / 3600000UL),
+           (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+           (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) / 1024),
+           (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024), net::rssi());
+  }
   if (web::takeRebootRequest()) {
     note("restarting (asked from the web)");
     delay(300);

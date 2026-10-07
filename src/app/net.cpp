@@ -28,6 +28,7 @@ namespace {
 
 State g_state = State::Off;
 bool g_ever_connected = false;
+uint32_t g_offline_since = 0;    // when the link went (0 = connected, or never was)
 std::string g_ssid;
 uint32_t g_join_ms = 0;
 SemaphoreHandle_t g_mux;
@@ -324,6 +325,7 @@ void loop() {
     if (WiFi.status() == WL_CONNECTED) {
       g_state = State::Connected;
       g_ever_connected = true;
+      g_offline_since = 0;
       startMdns();
       note("wifi: joined %s via %s as http://%s/ (%s.local), rssi %d", g_ssid.c_str(), WiFi.BSSIDstr().c_str(),
            WiFi.localIP().toString().c_str(), config::hostname().c_str(), (int)WiFi.RSSI());
@@ -352,7 +354,19 @@ void loop() {
   if (g_state == State::Connected && WiFi.status() != WL_CONNECTED) {
     g_state = State::Connecting;   // the stack reconnects by itself
     g_join_ms = millis();
+    g_offline_since = millis() | 1;
     note("wifi: link dropped; rejoining");
+  }
+  // A link that has worked and won't come back for 5 minutes: the Wi-Fi chip
+  // (a separate C6 behind SDIO) can wedge so that rejoining never succeeds,
+  // and its radio can only be restarted with the whole sign. (Found after a
+  // first 15-hour run with the camera on: offline until a power cycle.) A
+  // software restart keeps the log for "Before the last restart".
+  if (g_ever_connected && g_offline_since && !g_portal && millis() - g_offline_since > 5 * 60000) {
+    g_wc.w.restarts++;
+    note("wifi: no link for 5 minutes; restarting to recover");
+    delay(500);
+    ESP.restart();
   }
   if (g_portal && g_portal_close_ms && (int32_t)(millis() - g_portal_close_ms) >= 0) stopPortal();
   // Setup mode with a saved network: retry it every 30 s, but not while a

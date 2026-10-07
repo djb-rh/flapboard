@@ -132,6 +132,7 @@ void begin() {}
 
 std::string buildStatus();
 extern SemaphoreHandle_t g_status_mux;
+uint32_t g_motion_offs = 0, g_motion_ons = 0, g_motion_off_ms = 0, g_motion_on_ms = 0;
 extern std::string g_status_json;
 
 void loop() {
@@ -188,6 +189,9 @@ void loop() {
   }
   if (!updating && (p.on != g_on || p.reason != g_reason || (p.on && brightness != g_brightness))) {
     if (p.on != g_on) note("power: %s (%s)", p.on ? "on" : "off", p.reason.c_str());
+    // the camera's doing: off for no motion, and back on from that by motion
+    if (p.on != g_on && !p.on && p.reason == "no motion lately") g_motion_offs++, g_motion_off_ms = millis() | 1;
+    if (p.on != g_on && p.on && g_reason == "no motion lately") g_motion_ons++, g_motion_on_ms = millis() | 1;
     if (p.on != g_on || brightness != g_brightness) apply(p.on, brightness);
     if (p.on != g_on) motion::powerChanged();   // the scene's lighting just changed
     g_on = p.on;
@@ -234,6 +238,11 @@ std::string g_status_json = "{}";
 std::string buildStatus() {
   JsonDocument d;
   d["on"] = g_on;
+  // since this start: how often motion turned the sign off and on, and how long ago
+  d["motion_offs"] = g_motion_offs;
+  d["motion_ons"] = g_motion_ons;
+  d["motion_last_off_s"] = g_motion_off_ms ? (int64_t)((millis() - g_motion_off_ms) / 1000) : -1;
+  d["motion_last_on_s"] = g_motion_on_ms ? (int64_t)((millis() - g_motion_on_ms) / 1000) : -1;
   d["reason"] = g_reason;
   d["held_off"] = g_latch;
   d["relay_pin"] = g_pin;

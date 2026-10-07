@@ -20,7 +20,7 @@ USB-C and click Install. This erases the Tab5.
 **From a [release](https://github.com/djb-rh/flapboard/releases/latest):** `flapboard-<version>.bin` is the full image, flashed at offset 0:
 
 ```
-esptool.py --chip esp32p4 write_flash 0 flapboard-0.10.0.bin
+esptool.py --chip esp32p4 write_flash 0 flapboard-0.10.1.bin
 ```
 
 **From source:** [PlatformIO](https://platformio.org/), then `pio run -e app -t upload`.

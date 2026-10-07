@@ -9,6 +9,10 @@ Home Assistant over MQTT.
 
 ![The sign showing the clock](docs/sign.jpg)
 
+**Sample project:** [Model railroad digital billboard (M5Stack Tab5) on MakerWorld](https://makerworld.com/en/models/3404579-model-railroad-digital-billboard-m5stack-tab5#profileId-3876921)
+has the 3D print files to turn the Tab5 into an actual railroad-scale billboard, along with more
+build and support information.
+
 Licence: GPL-3.0-or-later (see [LICENSE](LICENSE)). The fonts in `assets/fonts` are under the SIL
 Open Font Licence, with their licence texts beside them.
 
@@ -20,7 +24,7 @@ USB-C and click Install. This erases the Tab5.
 **From a [release](https://github.com/djb-rh/flapboard/releases/latest):** `flapboard-<version>.bin` is the full image, flashed at offset 0:
 
 ```
-esptool.py --chip esp32p4 write_flash 0 flapboard-0.10.1.bin
+esptool.py --chip esp32p4 write_flash 0 flapboard-0.10.2.bin
 ```
 
 **From source:** [PlatformIO](https://platformio.org/), then `pio run -e app -t upload`.

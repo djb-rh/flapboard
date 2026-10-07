@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FlapBoard installer</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<style>
+:root{--bg:#0d1117;--panel:#161b22;--border:#30363d;--text:#e6edf3;--dim:#8b949e;--accent:#2f81f7}
+@media (prefers-color-scheme:light){:root{--bg:#f6f8fa;--panel:#fff;--border:#d0d7de;--text:#1f2328;--dim:#59636e;--accent:#0969da}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+main{max-width:760px;margin:0 auto;padding:28px 16px 48px}h1{margin:0 0 4px;font-size:28px}h2{font-size:19px;margin:28px 0 8px}
+p,li{color:var(--dim)}b,strong{color:var(--text)}a{color:var(--accent)}img{width:100%;border-radius:10px;border:1px solid var(--border);margin:14px 0}
+.box{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:18px 20px;margin:18px 0}
+ol{padding-left:22px}li{margin:6px 0}code{background:var(--panel);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--text)}
+button.install{background:#2f81f7;color:#fff;border:0;border-radius:8px;padding:12px 22px;font:600 17px system-ui,sans-serif;cursor:pointer;margin:8px 0 4px}
+button.install:hover{filter:brightness(1.1)}
+</style></head><body><main>
+<h1>FlapBoard</h1>
+<p>Firmware 0.10.0: a split-flap sign for the M5Stack Tab5, with messages, clock, weather, photos, a schedule,
+motion sensing, a relay output and Home Assistant.
+Source, docs and licence (GPL-3.0) on <a href="https://github.com/djb-rh/flapboard">GitHub</a>.</p>
+<img src="sign.jpg" alt="The sign showing the clock">
+
+<h2>1. Install the firmware</h2>
+<div class="box">
+<ol>
+<li>Use <b>Chrome or Edge on a desktop</b> (Web Serial is needed; Safari and Firefox do not have it).</li>
+<li>Connect the Tab5's <b>USB-C</b> port to the computer and switch the Tab5 on.</li>
+<li>Click <b>Install</b> below and choose the Tab5's port (it is usually called <b>USB JTAG/serial debug unit</b>).</li>
+</ol>
+<esp-web-install-button manifest="manifest.json">
+<button slot="activate" class="install">Install FlapBoard 0.10.0</button>
+<span slot="unsupported"><b>This browser cannot flash devices.</b> Use Chrome or Edge on a desktop computer.</span>
+<span slot="not-allowed"><b>The page must be opened over https.</b></span>
+</esp-web-install-button>
+<p>If no port shows up or the install fails: hold the Tab5's power button to put it in download mode, then try again.
+Installing replaces whatever firmware the Tab5 had and erases its settings. A sign that already runs FlapBoard
+can update itself instead: <b>Status &gt; System &gt; Update firmware</b> on its web page, with the
+<code>-update.bin</code> file from the <a href="https://github.com/djb-rh/flapboard/releases/latest">latest release</a>.</p>
+</div>
+
+<h2>2. Set it up</h2>
+<div class="box"><ol>
+<li>Put a microSD card in the Tab5. The sign reads <b>FAT32</b>; if the card is exFAT (most cards over 32 GB are),
+use <b>Files &gt; Format SD card</b> on the sign's web page once it is on Wi-Fi. That erases the card; Windows and
+macOS still read and write it afterwards.</li>
+<li>Wi-Fi: the first time, the sign opens a <b>FlapBoard-XXXX</b> hotspot. Join it from a phone; the setup page
+opens by itself. Pick your network and type its password.</li>
+<li>Open <b>http://flapboard.local/</b> (or <b>press and hold</b> the screen to see its address and a QR code) and
+set the time zone, weather location, messages and schedule.</li>
+</ol></div>
+</main></body></html>

@@ -162,7 +162,7 @@ bool inSetup() { return net::portalActive() && net::state() != net::State::Conne
 
 esp_err_t handleRoot(httpd_req_t *req) {
   if (inSetup()) return redirectToSetup(req);
-  return sendAsset(req, "/index.html");
+  return sendAsset(req, "/messages.html");   // the first tab
 }
 esp_err_t redirectTo(httpd_req_t *req, const char *where) {
   httpd_resp_set_status(req, "302 Found");
@@ -373,6 +373,7 @@ esp_err_t handleMotionSnapshot(httpd_req_t *req) {
 esp_err_t handleSchedulePage(httpd_req_t *req) { return sendAsset(req, "/schedule.html"); }
 
 esp_err_t handleMessagesPage(httpd_req_t *req) { return sendAsset(req, "/messages.html"); }
+esp_err_t handleSettingsPage(httpd_req_t *req) { return sendAsset(req, "/settings.html"); }
 esp_err_t handleClockPage(httpd_req_t *req) { return sendAsset(req, "/clock.html"); }
 esp_err_t handlePhotosPage(httpd_req_t *req) { return sendAsset(req, "/photos.html"); }
 
@@ -956,6 +957,7 @@ void begin() {
       {"/api/weather", HTTP_GET, handleWeather},
       {"/api/weather", HTTP_POST, handleWeather},
       {"/messages", HTTP_GET, handleMessagesPage},
+      {"/settings", HTTP_GET, handleSettingsPage},
       {"/schedule", HTTP_GET, handleSchedulePage},
       {"/api/power", HTTP_GET, handlePower},
       {"/api/mqtt", HTTP_GET, handleMqtt},

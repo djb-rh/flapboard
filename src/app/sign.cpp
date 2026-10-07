@@ -393,7 +393,7 @@ void drawAddress() {
     d.qrcode(("http://" + ip + "/").c_str(), lx + 6, kPanel.y + 204, 300, 3);
     d.setFont(&lgfx::fonts::FreeSans12pt7b);
     d.setTextColor(dim, panel);
-    d.drawString("Scan for the settings page", lx, kPanel.y + 528);
+    d.drawString("Scan for the web page", lx, kPanel.y + 528);
   }
 }
 

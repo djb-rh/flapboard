@@ -79,6 +79,7 @@ constexpr const char *kDefaults = R"JSON({
   "sleep_rules": [],
   "brightness": 80,
   "tap_wake_minutes": 5,
+  "relay_enabled": true,
   "relay_pin": -1,
   "relay_active_high": true,
   "mqtt_host": "",

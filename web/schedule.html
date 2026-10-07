@@ -12,7 +12,7 @@ button.mini{padding:5px 9px;font-size:13px}
 .savebar{position:sticky;bottom:0;background:var(--bg);padding:10px 0;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center}
 </style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/">Settings</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule" class="on">Schedule</a><a href="/clock">Clock &amp; weather</a></nav></div></header>
+<nav><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/clock">Weather/clock</a><a href="/schedule" class="on">Schedule</a><a href="/settings">Settings</a></nav></div></header>
 <main><div id="note"></div>
 <section class="card"><h2>Right now</h2>
 <p class="state" id="showing">...</p><p class="state" id="power" style="margin-top:6px">...</p>
@@ -31,7 +31,7 @@ button.mini{padding:5px 9px;font-size:13px}
 <div id="sleep"></div><div class="row"><button class="sec" id="addsleep">Add sleep hours</button></div>
 <p class="hint">A tap on the dark screen lights it for a few minutes. Until the clock is known (a minute after the very first start) the sign stays on rather than sitting dark.</p></section>
 
-<p class="hint" style="margin:0 0 16px">Motion sensing, the lights relay and how long a tap wakes the screen are on the <a href="/">Settings</a> page.</p>
+<p class="hint" style="margin:0 0 16px">Motion sensing, the lights relay and how long a tap wakes the screen are on the <a href="/settings">Settings</a> page.</p>
 
 <div class="savebar"><button id="save">Save</button><span class="dim" id="dirty"></span></div>
 </main>

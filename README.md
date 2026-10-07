@@ -34,7 +34,7 @@ Windows only refuses to *format* large cards as FAT32. The sign makes its folder
 
 The sign opens a Wi-Fi hotspot called **FlapBoard-XXXX**. Join it from a phone; the setup page
 opens by itself. Pick your network and type its password. After that the sign is at
-`http://flapboard.local/`, or at the address shown when you **tap anywhere on the screen**. The
+`http://flapboard.local/` (it opens on Messages), or at the address shown when you **tap anywhere on the screen**. The
 info sheet that opens has the address and a QR code for the web page, volume and brightness, buttons
 to switch between messages, weather/clock and photos, **Next** (the next message or photo), and
 **Status**, a page of how the sign is doing.
@@ -43,10 +43,6 @@ to switch between messages, weather/clock and photos, **Next** (the next message
 
 The web page has a tab for each part:
 
-- **Settings:** volume and brightness, motion sensing (with the camera check, and a Restart button
-  when turning it on needs one), the lights relay, the sign's name, Home Assistant, firmware update,
-  backup and restore, the Wi-Fi chip, formatting the SD card, extra fonts and sounds, and a Status
-  section with how the sign is doing and recent activity.
 - **Messages:** what to show (message files, clock, weather, fixed text, photos), in what order and
   for how long; then the board itself, with a live preview: rows and columns, cell size and spacing,
   font, colour theme, flip speed, and pictures beside the board (kept in `messages/side-pictures/`).
@@ -54,10 +50,14 @@ The web page has a tab for each part:
 - **Photos:** the slideshow: all photos, a folder or a selection; random or by name or date;
   dissolve, slide or cut; an optional clock in a corner; and the photo folder's files. Photos
   uploaded there are shrunk to the screen size in the browser before they go up.
+- **Weather/clock:** time zone, NTP server, time and date formats, and the weather location
+  ([Open-Meteo](https://open-meteo.com/), no key needed).
 - **Schedule:** which program shows when, one-off dates and sleep hours.
   A rule that runs past midnight belongs to the day it started on.
-- **Clock & weather:** time zone, NTP server, time and date formats, and the weather location
-  ([Open-Meteo](https://open-meteo.com/), no key needed).
+- **Settings:** volume and brightness, motion sensing (with the camera check, and a Restart button
+  when turning it on needs one), the lights relay, the sign's name, Home Assistant, firmware update,
+  backup and restore, the Wi-Fi chip, formatting the SD card, extra fonts and sounds, and a Status
+  section with how the sign is doing and recent activity.
 
 The (i) buttons next to text fields list the fields that fill themselves in, such as `{date}`.
 
@@ -70,8 +70,7 @@ is a row on the board. Text is upper-cased; letters, digits and `!@#$()-+&=;:'"%
 drum, plus colour tiles written `{R}` `{O}` `{Y}` `{G}` `{B}` `{V}` `{W}` `{K}`, and the four
 quarters of a UNC argyle block, `{a}{b}` over `{c}{d}`.
 
-**Argyle border:** messages, the clock and the weather each have a setting (Messages page, Clock &
-weather page) that runs stacked argyle blocks down both sides of the board, two columns each,
+**Argyle border:** messages, the clock and the weather each have a setting (Messages page, Weather/clock page) that runs stacked argyle blocks down both sides of the board, two columns each,
 with the text in between.
 
 ```
@@ -113,7 +112,7 @@ motion sensor, and diagnostics. Topics are under `flapboard/<id>/`, for example:
 ## Relay output
 
 A relay follows the display: on when the sign is on, off when it sleeps, is held off, or motion
-times out. Set the pin on the Settings page (Lights relay) and use the test button there.
+times out. Set the pin on the Settings page (Lights relay) and use the test button there; unticking "Use the relay" keeps it off.
 
 The easiest connection is the Tab5's **Port A** (the red Grove socket): red is **5 V**, black is
 **GND**, yellow is **G53** and white is **G54**. Port A's 5 V is switched on only while a relay pin

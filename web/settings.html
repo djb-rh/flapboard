@@ -5,7 +5,7 @@
 .check{display:flex;gap:8px;align-items:center;color:var(--text);font-size:15px}.check input{width:auto}
 .restart{display:flex;gap:12px;align-items:center;flex-wrap:wrap;border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:9px 12px;margin:10px 0 0;font-size:14px}</style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/" class="on">Settings</a><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a></nav></div></header>
+<nav><a href="/messages">Messages</a><a href="/photos">Photos</a><a href="/clock">Weather/clock</a><a href="/schedule">Schedule</a><a href="/settings" class="on">Settings</a></nav></div></header>
 <main>
 <div id="note"></div>
 <section class="card"><h2>Sound and screen</h2>
@@ -29,7 +29,9 @@
 <canvas id="cam" width="320" height="180" style="width:100%;max-width:640px;border-radius:8px;margin-top:10px;background:#000" hidden></canvas>
 <p class="hint">Uses the Tab5's front camera. Pictures are only taken while "Check the camera" is running, for aiming and tuning; red marks the parts of the picture that changed. Nothing is stored or sent anywhere. It needs some light: in a fully dark car the camera sees nothing. Switching the lights or display on or off is not counted as motion. Sleep hours and the schedule are on the <a href="/schedule">Schedule</a> page.</p></section>
 
-<section class="card"><h2>Lights relay</h2><div class="g">
+<section class="card"><h2>Lights relay</h2>
+<label class="check"><input type="checkbox" id="relay_enabled"> Use the relay (unticked, it stays off whatever the display does)</label>
+<div class="g">
 <div><label for="relay_pin">Relay on</label><select id="relay_pin">
 <option value="-1">No relay</option><option value="53">G53: Grove Port A (Relay unit)</option><option value="54">G54: Grove Port A, white wire</option>
 <option value="2">G2: M5-Bus</option><option value="3">G3: M5-Bus</option><option value="4">G4: M5-Bus</option><option value="16">G16: M5-Bus</option>
@@ -113,8 +115,9 @@ $('#msave').onclick=async()=>{const bad=MKEYS.map(k=>$('#'+k)).find(i=>!i.checkV
   const r=await post('/api/config',b);if(!r.ok){note('err',r.d.error||'Could not save');return}note('ok','Saved.');setTimeout(refresh,800)};
 $('#motion_enabled').onchange=()=>$('#msave').click();   // the box takes effect at once (or offers the restart)
 $('#restartnow').onclick=()=>restart('Restarting to start the camera... this page reloads when the sign is back (about 30 seconds).');
-$('#rsave').onclick=async()=>{const r=await post('/api/config',{relay_pin:+$('#relay_pin').value,relay_active_high:$('#relay_active_high').value==='1'});
+$('#rsave').onclick=async()=>{const r=await post('/api/config',{relay_enabled:$('#relay_enabled').checked,relay_pin:+$('#relay_pin').value,relay_active_high:$('#relay_active_high').value==='1'});
   note(r.ok?'ok':'err',r.ok?'Saved.':(r.d.error||'Could not save'));setTimeout(refresh,800)};
+$('#relay_enabled').onchange=()=>$('#rsave').click();
 $('#test').onclick=async()=>{await post('/api/power',{relay_test:3});note('ok','Flipping the relay off and on three times (6 seconds), then back to normal.');setTimeout(refresh,500)};
 // "Check the camera": a snapshot every second with the changed cells over it.
 let camTimer=null;
@@ -211,7 +214,7 @@ async function refresh(){
     $('#motionstate').textContent=m.enabled?('Watching. Last movement '+ago(m.last_motion_s)+'; '+Number(m.changed_pct).toFixed(1)+'% of the picture changed just now.'):(m.needs_restart?'':'Camera: '+(m.status||'off')+'.');
     $('#motioncount').textContent=(m.enabled||p.motion_offs)?'Since the last restart, motion sensing has turned the display off '+p.motion_offs+' time'+(p.motion_offs===1?'':'s')+
       ' (last '+ago(p.motion_last_off_s)+') and back on '+p.motion_ons+' time'+(p.motion_ons===1?'':'s')+' (last '+ago(p.motion_last_on_s)+').':'';
-    $('#relaystate').textContent=p.relay_pin<0?'No relay set.':'Relay on G'+p.relay_pin+' is '+(p.relay_on?'on':'off')+'.';
+    $('#relaystate').textContent=p.relay_pin<0?'No relay set.':'Relay on G'+p.relay_pin+' is '+(p.relay_on?'on':'off')+(p.relay_enabled===false?' (turned off here).':'.');
     const w=s.wifi;
     const wifi=w.state==='connected'?'<span class="good">connected</span> to '+esc(w.ssid)+' ('+w.rssi+' dBm)':'<span class="warn">'+esc(w.state)+'</span> '+esc(w.ssid);
     const sdBad=!s.sd.mounted,why=sdBad?(s.sd.problem||'unknown'):'';
@@ -240,7 +243,7 @@ $('#statussec').addEventListener('toggle',refresh);
 async function load(){try{const c=await (await fetch('/api/config')).json();
   if(Date.now()-briBusy>3000){$('#bri').value=c.brightness;$('#briOut').textContent=c.brightness+'%'}
   $('#motion_enabled').checked=c.motion_enabled;MKEYS.forEach(k=>$('#'+k).value=c[k]);
-  $('#relay_pin').value=String(c.relay_pin);$('#relay_active_high').value=c.relay_active_high?'1':'0';
+  $('#relay_enabled').checked=c.relay_enabled!==false;$('#relay_pin').value=String(c.relay_pin);$('#relay_active_high').value=c.relay_active_high?'1':'0';
   mqRefresh(c)}catch(e){}}
 if(location.hash==='#status')$('#statussec').open=true;
 if(location.hash==='#fonts')$('#fontsnd').open=true;

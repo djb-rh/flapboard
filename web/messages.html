@@ -27,7 +27,7 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 .more{margin-top:16px}
 </style></head><body>
 <header><div class="in"><b id="name">FlapBoard</b>
-<nav><a href="/">Settings</a><a href="/messages" class="on">Messages</a><a href="/photos">Photos</a><a href="/schedule">Schedule</a><a href="/clock">Clock &amp; weather</a></nav></div></header>
+<nav><a href="/messages" class="on">Messages</a><a href="/photos">Photos</a><a href="/clock">Weather/clock</a><a href="/schedule">Schedule</a><a href="/settings">Settings</a></nav></div></header>
 <main><div id="note"></div>
 <div class="wrap">
 <section class="card show"><h2>What to show</h2><div class="grid2">
@@ -44,7 +44,7 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 <input id="msg_suffix" placeholder="{date}"><div class="sample" id="s_suffix"></div>
 <p class="hint">The lines before go on the top rows and the lines after on the bottom rows, with the message centred between. They share the board with the message: keep your message paragraphs short enough to leave room for them, or the bottom lines of a long message won't show.</p></div>
 <label class="check" id="borderrow"><input type="checkbox" id="border"> <span id="borderlbl">Argyle border down each side</span></label>
-<p class="hint">The clock and weather layouts are on the <a href="/clock">Clock &amp; weather</a> page; the slideshow on the <a href="/photos">Photos</a> page. The <a href="/schedule">Schedule</a> page can switch between these by day and time.</p></section>
+<p class="hint">The clock and weather layouts are on the <a href="/clock">Weather/clock</a> page; the slideshow on the <a href="/photos">Photos</a> page. The <a href="/schedule">Schedule</a> page can switch between these by day and time.</p></section>
 
 <div class="preview"><canvas id="cv" width="1280" height="720" aria-label="Preview of the sign"></canvas>
 <p class="hint" id="info"></p>
@@ -71,7 +71,7 @@ textarea{width:100%;font:14px/1.5 ui-monospace,Menlo,monospace;padding:9px 11px;
 <div><label>Background</label><div class="inline"><input type="color" id="c_background"><label class="chk"><input type="checkbox" id="u_background"> custom</label></div></div>
 <div><label>Flaps</label><div class="inline"><input type="color" id="c_flap"><label class="chk"><input type="checkbox" id="u_flap"> custom</label></div></div>
 <div><label>Letters</label><div class="inline"><input type="color" id="c_glyph"><label class="chk"><input type="checkbox" id="u_glyph"> custom</label></div></div>
-</div><p class="hint">More fonts: upload a .ttf under <a href="/#fonts">Settings &gt; Fonts and sounds</a>. Letters only; the colour tiles keep their colours.</p></section>
+</div><p class="hint">More fonts: upload a .ttf under <a href="/settings#fonts">Settings &gt; Fonts and sounds</a>. Letters only; the colour tiles keep their colours.</p></section>
 
 <section class="card"><h2>Side pictures</h2><div class="grid2">
 <div><label for="side_left">Left</label><select id="side_left"></select><button class="sec" id="up_left" style="margin-top:6px">Upload...</button></div>

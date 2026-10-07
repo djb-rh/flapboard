@@ -162,8 +162,10 @@ void loop() {
   }
 
   int brightness, wake_min, motion_min;
+  bool relay_enabled;
   {
     config::Reader r;
+    relay_enabled = r.doc()["relay_enabled"] | true;   // off: the relay stays off whatever the display does
     brightness = (int)((r.doc()["brightness"] | 80) * 255 / 100);
     wake_min = std::max(0, std::min(120, (int)(r.doc()["tap_wake_minutes"] | 5)));   // the web page's ranges
     motion_min = std::max(1, std::min(240, (int)(r.doc()["motion_timeout"] | 10)));
@@ -203,10 +205,10 @@ void loop() {
   // now (forcing it on showed nothing while the screen was on anyway).
   const bool testing = g_relay_test_until && (int32_t)(millis() - g_relay_test_until) < 0;
   if (!testing) g_relay_test_until = 0;
-  bool relay = g_on;
+  bool relay = g_on && relay_enabled;
   if (testing) {
     const uint32_t left = g_relay_test_until - millis();
-    if ((left / kFlipMs) % 2 == 1) relay = !g_on;   // odd seconds left: the other way
+    if ((left / kFlipMs) % 2 == 1) relay = !relay;   // odd seconds left: the other way
   }
   if (g_pin >= 0 && relay != g_relay) driveRelay(relay);
   std::string st = buildStatus();
@@ -247,6 +249,10 @@ std::string buildStatus() {
   d["held_off"] = g_latch;
   d["relay_pin"] = g_pin;
   d["relay_on"] = g_pin >= 0 && g_relay;
+  {
+    config::Reader r;
+    d["relay_enabled"] = r.doc()["relay_enabled"] | true;
+  }
   d["port_a_5v"] = g_ext5v == 1;
   d["woken_for_s"] = g_wake_until && (int32_t)(millis() - g_wake_until) < 0 ? (g_wake_until - millis()) / 1000 : 0;
   std::string out;

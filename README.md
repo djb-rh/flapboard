@@ -14,13 +14,13 @@ Open Font Licence, with their licence texts beside them.
 
 ## Install
 
-**Web installer:** open the installer page in Chrome or Edge on a desktop, connect the Tab5 by
+**Web installer:** open [the installer page](https://djb-rh.github.io/flapboard/) in Chrome or Edge on a desktop, connect the Tab5 by
 USB-C and click Install. This erases the Tab5.
 
-**From a release:** `flapboard-<version>.bin` is the full image, flashed at offset 0:
+**From a [release](https://github.com/djb-rh/flapboard/releases/latest):** `flapboard-<version>.bin` is the full image, flashed at offset 0:
 
 ```
-esptool.py --chip esp32p4 write_flash 0 flapboard-0.9.0.bin
+esptool.py --chip esp32p4 write_flash 0 flapboard-0.10.0.bin
 ```
 
 **From source:** [PlatformIO](https://platformio.org/), then `pio run -e app -t upload`.
